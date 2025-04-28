@@ -1,13 +1,10 @@
 header:
   license:
     spdx-id: Apache-2.0
-    copyright-owner: CloudWeGo Authors
+    copyright-owner: SREDIAG Authors
 
   paths:
     - '**/*.go'
     - '**/*.s'
-
-  paths-ignore:
-
 
   comment: on-failure
