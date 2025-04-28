@@ -21,15 +21,12 @@ import (
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
-	"os"
-	"path/filepath"
 	"runtime"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/srediag/plugin-shm/examples/best_practice/idl"
-	"github.com/srediag/plugin-shm/plugin"
+	"github.com/srediag/plugin-shm/pkg/plugin"
 )
 
 var (
@@ -107,24 +104,4 @@ func init() {
 	go func() {
 		http.ListenAndServe(":20000", nil) //nolint:errcheck
 	}()
-}
-
-func main() {
-	// 1. listen unix domain socket
-	dir, err := os.Getwd()
-	if err != nil {
-		panic(err)
-	}
-	udsPath := filepath.Join(dir, "../ipc_test.sock")
-
-	_ = syscall.Unlink(udsPath)
-	config := plugin.NewDefaultListenerConfig(udsPath, "unix")
-	ln, err := plugin.NewListener(&listenCbImpl{}, config)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	if err := ln.Run(); err != nil {
-		fmt.Println("listener run error:" + err.Error())
-	}
 }

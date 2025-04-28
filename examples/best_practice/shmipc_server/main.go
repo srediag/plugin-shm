@@ -19,54 +19,14 @@ package shmipc_server
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	_ "net/http/pprof"
-	"os"
-	"path/filepath"
 	"runtime"
 	"sync/atomic"
-	"syscall"
 	"time"
-
-	"github.com/srediag/plugin-shm/examples/best_practice/idl"
-	"github.com/srediag/plugin-shm/plugin"
 )
 
 var count uint64
-
-// handleStream is used in main, suppress unused warning
-func handleStream(s *plugin.Stream) {
-	req := &idl.Request{}
-	resp := &idl.Response{}
-	for {
-		// 1. deserialize Request
-		if err := req.ReadFromShm(s.BufferReader()); err != nil {
-			fmt.Println("stream read request, err=" + err.Error())
-			return
-		}
-
-		{
-			// 2. handle request
-			atomic.AddUint64(&count, 1)
-		}
-
-		// 3.serialize Response
-		resp.ID = req.ID
-		resp.Name = req.Name
-		resp.Image = req.Key
-		if err := resp.WriteToShm(s.BufferWriter()); err != nil {
-			fmt.Println("stream write response failed, err=" + err.Error())
-			return
-		}
-		if err := s.Flush(false); err != nil {
-			fmt.Println("stream write response failed, err=" + err.Error())
-			return
-		}
-		req.Reset()
-		resp.Reset()
-	}
-}
 
 func init() {
 	go func() {
@@ -81,63 +41,4 @@ func init() {
 		http.ListenAndServe(":20000", nil) //nolint:errcheck
 	}()
 	runtime.GOMAXPROCS(1)
-}
-
-// main is the entry point, suppress unused warning
-func main() {
-	dir, err := os.Getwd()
-	if err != nil {
-		panic(err)
-	}
-	udsPath := filepath.Join(dir, "../ipc_test.sock")
-
-	// 1. listen unix domain socket
-	_ = syscall.Unlink(udsPath)
-	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: udsPath, Net: "unix"})
-	if err != nil {
-		panic(err)
-	}
-	defer func() {
-		if err := ln.Close(); err != nil {
-			fmt.Println("ln.Close error:", err)
-		}
-	}()
-
-	// 2. accept a unix domain socket
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			fmt.Printf("accept error:%s now exit", err.Error())
-			return
-		}
-		go func() {
-			defer func() {
-				if err := conn.Close(); err != nil {
-					fmt.Println("conn.Close error:", err)
-				}
-			}()
-
-			// 3. create server session
-			conf := plugin.DefaultConfig()
-			server, err := plugin.Server(conn, conf)
-			if err != nil {
-				panic("new ipc server failed " + err.Error())
-			}
-			defer func() {
-				if err := server.Close(); err != nil {
-					fmt.Println("server.Close error:", err)
-				}
-			}()
-
-			// 4. accept stream and handle
-			for {
-				stream, err := server.AcceptStream()
-				if err != nil {
-					fmt.Println("shmipc server accept stream failed, err=" + err.Error())
-					break
-				}
-				go handleStream(stream)
-			}
-		}()
-	}
 }

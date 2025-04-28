@@ -19,58 +19,14 @@ package net_server
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	_ "net/http/pprof"
-	"os"
-	"path/filepath"
 	"runtime"
 	"sync/atomic"
-	"syscall"
 	"time"
-
-	"github.com/srediag/plugin-shm/examples/best_practice/idl"
 )
 
 var count uint64
-
-func handleConn(conn net.Conn) {
-	defer func() {
-		if err := conn.Close(); err != nil {
-			fmt.Println("conn.Close error:", err)
-		}
-	}()
-
-	req := &idl.Request{}
-	resp := &idl.Response{}
-	for {
-		//1.deserialize Request
-		readBuffer := idl.BufferPool.Get().([]byte)
-		n, err := conn.Read(readBuffer)
-		if err != nil {
-			fmt.Println("conn.Read", err)
-			return
-		}
-		req.Deserialize(readBuffer[:n])
-		idl.BufferPool.Put(&readBuffer)
-
-		{
-			//2.handle request
-			atomic.AddUint64(&count, 1)
-		}
-
-		//3.serialize Response
-		resp.ID = req.ID
-		resp.Name = req.Name
-		resp.Image = req.Key
-		writeBuffer := req.Serialize()
-		idl.MustWrite(conn, writeBuffer)
-		idl.BufferPool.Put(&writeBuffer)
-
-		req.Reset()
-		resp.Reset()
-	}
-}
 
 func init() {
 	go func() {
@@ -85,35 +41,4 @@ func init() {
 		http.ListenAndServe(":20000", nil) //nolint:errcheck
 	}()
 	runtime.GOMAXPROCS(1)
-}
-
-func main() {
-	// 1. listen unix domain socket
-	dir, err := os.Getwd()
-	if err != nil {
-		panic(err)
-	}
-	udsPath := filepath.Join(dir, "../ipc_test.sock")
-
-	_ = syscall.Unlink(udsPath)
-	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: udsPath, Net: "unix"})
-	if err != nil {
-		panic(err)
-	}
-	defer func() {
-		if err := ln.Close(); err != nil {
-			fmt.Println("ln.Close error:", err)
-		}
-	}()
-
-	// 2. accept a unix domain socket
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			fmt.Printf("accept error:%s now exit \n", err.Error())
-			return
-		}
-		go handleConn(conn)
-	}
-
 }

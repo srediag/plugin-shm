@@ -22,7 +22,7 @@ import (
 	"net"
 	"sync"
 
-	plugin "github.com/srediag/plugin-shm/plugin"
+	plugin "github.com/srediag/plugin-shm/pkg/plugin"
 )
 
 // the idl is the Request struct and Response struct.

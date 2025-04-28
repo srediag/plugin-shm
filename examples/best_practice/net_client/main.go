@@ -18,19 +18,12 @@
 package net_client
 
 import (
-	"crypto/rand"
-	"flag"
 	"fmt"
-	"net"
 	"net/http"
 	_ "net/http/pprof"
-	"os"
-	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"time"
-
-	"github.com/srediag/plugin-shm/examples/best_practice/idl"
 )
 
 var count uint64
@@ -48,68 +41,4 @@ func init() {
 		http.ListenAndServe(":20001", nil) //nolint:errcheck
 	}()
 	runtime.GOMAXPROCS(1)
-}
-
-func main() {
-	packageSize := flag.Int("p", 1024, "-p 1024 mean that request and response's size are both near 1KB")
-	flag.Parse()
-
-	randContent := make([]byte, *packageSize)
-	_, _ = rand.Read(randContent)
-
-	// 1. dial unix domain socket
-	dir, err := os.Getwd()
-	if err != nil {
-		panic(err)
-	}
-
-	address := filepath.Join(dir, "../ipc_test.sock")
-	network := "unix"
-
-	concurrency := 500
-	qps := 50000000
-
-	for i := 0; i < concurrency; i++ {
-		go func() {
-			req := &idl.Request{}
-			resp := &idl.Response{}
-			n := qps / concurrency
-			conn, err := net.Dial(network, address)
-			if err != nil {
-				fmt.Println("dial error", err)
-				return
-			}
-			for range time.Tick(time.Second) {
-				for k := 0; k < n; k++ {
-					now := time.Now()
-					//serialize request
-					req.Reset()
-					req.ID = uint64(now.UnixNano())
-					req.Name = "xxx"
-					req.Key = randContent
-					writeBuffer := req.Serialize()
-					idl.MustWrite(conn, writeBuffer)
-					idl.BufferPool.Put(writeBuffer)
-
-					//wait and read response
-					buf := idl.BufferPool.Get().([]byte)
-					n, err := conn.Read(buf)
-					if err != nil {
-						fmt.Println("conn.Read error ", err)
-						return
-					}
-					resp.Reset()
-					resp.Deserialize(buf[:n])
-					idl.BufferPool.Put(buf)
-
-					{
-						//handle response...
-						atomic.AddUint64(&count, 1)
-					}
-				}
-			}
-		}()
-	}
-
-	time.Sleep(1200 * time.Second)
 }

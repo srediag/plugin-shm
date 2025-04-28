@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/srediag/plugin-shm/plugin"
+	"github.com/srediag/plugin-shm/pkg/plugin"
 )
 
 var (

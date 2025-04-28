@@ -18,19 +18,15 @@
 package shmipc_async_client
 
 import (
-	"crypto/rand"
 	"fmt"
-	"math"
 	"net/http"
 	_ "net/http/pprof"
-	"os"
-	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"time"
 
 	"github.com/srediag/plugin-shm/examples/best_practice/idl"
-	"github.com/srediag/plugin-shm/plugin"
+	"github.com/srediag/plugin-shm/pkg/plugin"
 )
 
 var (
@@ -58,7 +54,6 @@ type streamCbImpl struct {
 	req    idl.Request
 	resp   idl.Response
 	stream *plugin.Stream
-	smgr   *plugin.SessionManager
 	key    []byte
 	loop   uint64
 	n      uint64
@@ -108,53 +103,4 @@ func (s *streamCbImpl) OnLocalClose() {
 func (s *streamCbImpl) OnRemoteClose() {
 	//fmt.Println("stream OnRemoteClose")
 
-}
-
-func main() {
-	// 1. dial unix domain socket
-	dir, err := os.Getwd()
-	if err != nil {
-		panic(err)
-	}
-
-	// 2. init session manager
-	conf := plugin.DefaultSessionManagerConfig()
-	conf.Address = filepath.Join(dir, "../ipc_test.sock")
-	conf.Network = "unix"
-	conf.SessionNum = 1
-	conf.ShareMemoryBufferCap = 32 << 20
-	conf.MemMapType = plugin.MemMapTypeMemFd
-	smgr, err := plugin.InitGlobalSessionManager(conf)
-	if err != nil {
-		panic(err)
-	}
-
-	concurrency := 500
-
-	for i := 0; i < concurrency; i++ {
-		go func() {
-			key := make([]byte, 1024)
-			if _, err := rand.Read(key); err != nil {
-				fmt.Printf("Failed to generate random key: %v\n", err)
-				return
-			}
-			s := &streamCbImpl{key: key, smgr: smgr, loop: math.MaxUint64}
-			stream, err := smgr.GetStream()
-			if err != nil {
-				fmt.Println("get stream error:" + err.Error())
-				return
-			}
-			s.stream = stream
-			s.n = 0
-			if err := stream.SetCallbacks(s); err != nil {
-				fmt.Println("set callbacks error:" + err.Error())
-				return
-			}
-			s.send()
-			// and maybe call `smgr.PutBack()` or `stream.Close()` when you are no longer using the stream.
-		}()
-	}
-
-	time.Sleep(10030 * time.Second)
-	fmt.Println("smgr.Close():", smgr.Close())
 }
