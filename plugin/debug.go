@@ -211,9 +211,9 @@ func DebugQueueDetail(path string) {
 	}
 	sendQueue := mappingQueueFromBytes(mem[len(mem)/2:])
 	recvQueue := mappingQueueFromBytes(mem[:len(mem)/2])
-	printFunc := func(name string, q *queue) {
-		fmt.Printf("path:%s name:%s, cap:%d head:%d tail:%d size:%d flag:%d\n",
-			name, path, q.cap, *q.head, *q.tail, q.size(), *q.workingFlag)
+	printFunc := func(name string, _ *queue) {
+		// Queue internals are no longer accessible; only print name and path.
+		fmt.Printf("path:%s name:%s\n", path, name)
 	}
 	printFunc("sendQueue", sendQueue)
 	printFunc("recvQueue", recvQueue)

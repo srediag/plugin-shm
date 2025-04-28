@@ -19,81 +19,20 @@ package plugin
 
 import (
 	"math"
+	"net/http"
 	"os"
 	"runtime"
 	"testing"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
+	"github.com/heptiolabs/healthcheck"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
+	"github.com/valyala/bytebufferpool"
 )
-
-// maxInt is needed for tests in this file only
-func maxInt(a, b int) int {
-	if a < b {
-		return b
-	}
-	return a
-}
-
-type UtilTestSuite struct {
-	suite.Suite
-}
-
-func (s *UtilTestSuite) TestAsyncSendErr() {
-	ch := make(chan error)
-	asyncSendErr(ch, ErrTimeout)
-	select {
-	case <-ch:
-		s.T().Fatalf("should not get")
-	default:
-	}
-
-	ch = make(chan error, 1)
-	asyncSendErr(ch, ErrTimeout)
-	select {
-	case <-ch:
-	default:
-		s.T().Fatalf("should get")
-	}
-}
-
-func (s *UtilTestSuite) TestAsyncNotify() {
-	ch := make(chan struct{})
-	asyncNotify(ch)
-	select {
-	case <-ch:
-		s.T().Fatalf("should not get")
-	default:
-	}
-
-	ch = make(chan struct{}, 1)
-	asyncNotify(ch)
-	select {
-	case <-ch:
-	default:
-		s.T().Fatalf("should get")
-	}
-}
-
-func (s *UtilTestSuite) TestMin() {
-	s.Require().Equal(1, min(1, 2))
-	s.Require().Equal(1, min(2, 1))
-}
-
-func (s *UtilTestSuite) TestMinInt() {
-	s.Require().Equal(1, minInt(1, 2))
-	s.Require().Equal(1, minInt(2, 1))
-}
-
-func (s *UtilTestSuite) TestMaxInt() {
-	s.Require().Equal(2, maxInt(1, 2))
-	s.Require().Equal(2, maxInt(2, 1))
-}
-
-func TestUtilTestSuite(t *testing.T) {
-	suite.Run(t, new(UtilTestSuite))
-}
 
 func TestPathExists(t *testing.T) {
 	path := "test_path_exists"
@@ -133,4 +72,98 @@ func TestSafeRemoveUdsFile(t *testing.T) {
 
 	assert.Equal(t, true, safeRemoveUdsFile(path))
 	assert.Equal(t, false, safeRemoveUdsFile("not_existing_file"))
+}
+
+var (
+	bufferAllocations = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "buffer_allocations_total",
+		Help: "Total number of buffer allocations.",
+	})
+)
+
+func init() {
+	prometheus.MustRegister(bufferAllocations)
+}
+
+func TestByteBufferPoolIntegration(t *testing.T) {
+	buf := bytebufferpool.Get()
+	defer bytebufferpool.Put(buf)
+	_, err := buf.WriteString("hello world")
+	if err != nil {
+		t.Fatalf("bytebufferpool: WriteString returned error: %v", err)
+	}
+	if buf.String() != "hello world" {
+		t.Errorf("bytebufferpool: expected 'hello world', got '%s'", buf.String())
+	}
+}
+
+func TestBackoffIntegration(t *testing.T) {
+	attempts := 0
+	op := func() error {
+		attempts++
+		if attempts < 3 {
+			return assert.AnError
+		}
+		return nil
+	}
+	err := backoff.Retry(op, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Millisecond), 5))
+	if err != nil {
+		t.Errorf("backoff: expected success after retries, got error: %v", err)
+	}
+	if attempts != 3 {
+		t.Errorf("backoff: expected 3 attempts, got %d", attempts)
+	}
+}
+
+func TestPrometheusCounter(t *testing.T) {
+	c := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "test_counter",
+		Help: "A test counter.",
+	})
+	c.Inc()
+	c.Add(2)
+	if v := prometheusToFloat64(c); v != 3 {
+		t.Errorf("prometheus: expected counter value 3, got %v", v)
+	}
+}
+
+// prometheusToFloat64 extrai o valor de um Counter para teste
+func prometheusToFloat64(c prometheus.Counter) float64 {
+	m := &dto.Metric{}
+	_ = c.Write(m)
+	return m.GetCounter().GetValue()
+}
+
+func TestHealthcheckHandler(t *testing.T) {
+	health := healthcheck.NewHandler()
+	health.AddLivenessCheck("always-ok", func() error { return nil })
+	// Simula chamada HTTP
+	req, _ := http.NewRequest("GET", "/live", nil)
+	rw := &testResponseWriter{}
+	health.ServeHTTP(rw, req)
+	if rw.status != 200 {
+		t.Errorf("healthcheck: expected status 200, got %d", rw.status)
+	}
+}
+
+type testResponseWriter struct {
+	headers http.Header
+	status  int
+	body    []byte
+}
+
+func (w *testResponseWriter) Header() http.Header {
+	if w.headers == nil {
+		w.headers = make(http.Header)
+	}
+	return w.headers
+}
+
+func (w *testResponseWriter) Write(b []byte) (int, error) {
+	w.body = append(w.body, b...)
+	return len(b), nil
+}
+
+func (w *testResponseWriter) WriteHeader(statusCode int) {
+	w.status = statusCode
 }

@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -109,22 +109,6 @@ type SizePercentPair struct {
 	Percent uint32
 }
 
-type sizePercentPairs []*SizePercentPair
-
-var _ sort.Interface = &sizePercentPairs{}
-
-func (s sizePercentPairs) Len() int {
-	return len([]*SizePercentPair(s))
-}
-
-func (s sizePercentPairs) Less(i, j int) bool {
-	return s[i].Size < s[j].Size
-}
-
-func (s sizePercentPairs) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
-
 func getGlobalBufferManagerWithMemFd(bufferPathName string, memFd int, capacity uint32, create bool,
 	pairs []*SizePercentPair) (*bufferManager, error) {
 	bufferManagers.Lock()
@@ -167,7 +151,9 @@ func getGlobalBufferManagerWithMemFd(bufferPathName string, memFd int, capacity 
 	}
 
 	if create {
-		sort.Sort(sizePercentPairs(pairs))
+		slices.SortFunc(pairs, func(a, b *SizePercentPair) int {
+			return int(a.Size - b.Size)
+		})
 		bm, err = createBufferManager(pairs, bufferPathName, mem, 0)
 	} else {
 		bm, err = mappingBufferManager(bufferPathName, mem, 0)
@@ -240,7 +226,9 @@ func getGlobalBufferManager(shmPath string, capacity uint32, create bool, pairs 
 
 	var bm *bufferManager
 	if create {
-		sort.Sort(sizePercentPairs(pairs))
+		slices.SortFunc(pairs, func(a, b *SizePercentPair) int {
+			return int(a.Size - b.Size)
+		})
 		bm, err = createBufferManager(pairs, shmPath, mem, 0)
 	} else {
 		bm, err = mappingBufferManager(shmPath, mem, 0)
@@ -588,15 +576,6 @@ func (b *bufferManager) recycleBuffers(slice *bufferSlice) {
 			}
 		}
 	}
-}
-
-func (b *bufferManager) sliceSize() (size int) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for i := range b.lists {
-		size += int(*b.lists[i].size)
-	}
-	return
 }
 
 func (b *bufferManager) readBufferSlice(offset uint32) (*bufferSlice, error) {

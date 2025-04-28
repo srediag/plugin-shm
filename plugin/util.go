@@ -56,7 +56,7 @@ func asyncNotify(ch chan struct{}) {
 	}
 }
 
-// min computes the minimum of two values
+// minInt computes the minimum of two ints
 // func min(a, b uint32) uint32 {
 // 	if a < b {
 // 		return a
@@ -64,14 +64,14 @@ func asyncNotify(ch chan struct{}) {
 // 	return b
 // }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
+// func minInt(a, b int) int {
+// 	if a < b {
+// 		return a
+// 	}
+// 	return b
+// }
 
-// maxInt computes the maximum of two values
+// maxInt computes the maximum of two ints
 // func maxInt(a, b int) int {
 // 	if a < b {
 // 		return b

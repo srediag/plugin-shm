@@ -82,6 +82,4 @@ var (
 
 	//ErrQueueFull mean that the server is so busy that the io queue is full
 	ErrQueueFull = errors.New("the io queue is full")
-
-	errQueueEmpty = errors.New("the io queue is empty")
 )

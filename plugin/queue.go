@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
-	"sync/atomic"
 	"syscall"
 	"unsafe"
+
+	queuepkg "github.com/Workiva/go-datastructures/queue"
 )
 
 const (
@@ -42,12 +42,7 @@ type queueManager struct {
 
 // default cap is 16384, which mean that 16384 * 8 = 128 KB memory.
 type queue struct {
-	sync.Mutex
-	head               *int64  // consumer write, producer read
-	tail               *int64  // producer write, consumer read
-	workingFlag        *uint32 //when peer is consuming the queue, the workingFlag is 1, otherwise 0.
-	cap                int64
-	queueBytesOnMemory []byte // it could be from share memory or process memory.
+	q *queuepkg.Queue
 }
 
 type queueElement struct {
@@ -186,36 +181,29 @@ func countQueueMemSize(queueCap uint32) int {
 	return queueHeaderLength + queueElementLen*int(queueCap)
 }
 
-func createQueueFromBytes(data []byte, cap uint32) *queue {
-	*(*uint32)(unsafe.Pointer(&data[0])) = cap
-	q := mappingQueueFromBytes(data)
-	*q.head = 0
-	*q.tail = 0
-	*q.workingFlag = 0
-	return q
+func createQueueFromBytes(_ []byte, cap uint32) *queue {
+	return &queue{q: queuepkg.New(int64(cap))}
 }
 
 func mappingQueueFromBytes(data []byte) *queue {
 	cap := *(*uint32)(unsafe.Pointer(&data[0]))
-	queueStartOffset := queueHeaderLength
-	queueEndOffset := queueHeaderLength + cap*queueElementLen
-	if isArmArch() {
-		// align 8 byte boundary for head and tail
-		return &queue{
-			cap:                int64(cap),
-			workingFlag:        (*uint32)(unsafe.Pointer(&data[4])),
-			head:               (*int64)(unsafe.Pointer(&data[8])),
-			tail:               (*int64)(unsafe.Pointer(&data[16])),
-			queueBytesOnMemory: data[queueStartOffset:queueEndOffset],
-		}
+	return &queue{q: queuepkg.New(int64(cap))}
+}
+
+func (q *queue) pop() (e queueElement, err error) {
+	items, err := q.q.Get(1)
+	if err != nil || len(items) == 0 {
+		return queueElement{}, err
 	}
-	return &queue{
-		cap:                int64(cap),
-		head:               (*int64)(unsafe.Pointer(&data[4])),
-		tail:               (*int64)(unsafe.Pointer(&data[12])),
-		workingFlag:        (*uint32)(unsafe.Pointer(&data[20])),
-		queueBytesOnMemory: data[queueStartOffset:queueEndOffset],
+	qe, ok := items[0].(queueElement)
+	if !ok {
+		return queueElement{}, fmt.Errorf("invalid queue element type")
 	}
+	return qe, nil
+}
+
+func (q *queue) put(e queueElement) error {
+	return q.q.Put(e)
 }
 
 func (q *queueManager) unmap() {
@@ -235,55 +223,4 @@ func (q *queueManager) unmap() {
 			internalLogger.infof("queueManager close queue fd:%d", q.memFd)
 		}
 	}
-}
-
-func (q *queue) size() int64 {
-	return atomic.LoadInt64(q.tail) - atomic.LoadInt64(q.head)
-}
-
-func (q *queue) pop() (e queueElement, err error) {
-	//atomic ensure the data that  peer write to share memory could be see.
-	head := atomic.LoadInt64(q.head)
-	if head >= atomic.LoadInt64(q.tail) {
-		err = errQueueEmpty
-		return
-	}
-	queueOffset := (head % q.cap) * queueElementLen
-	e.seqID = *(*uint32)(unsafe.Pointer(&q.queueBytesOnMemory[queueOffset]))
-	e.offsetInShmBuf = *(*uint32)(unsafe.Pointer(&q.queueBytesOnMemory[queueOffset+4]))
-	e.status = *(*uint32)(unsafe.Pointer(&q.queueBytesOnMemory[queueOffset+8]))
-	atomic.AddInt64(q.head, 1)
-	return
-}
-
-func (q *queue) put(e queueElement) error {
-	//ensure that increasing q.tail and writing queueElement are both atomic.
-	//because if firstly increase q.tail, the peer will think that the queue have new element and will consume it.
-	//but at this moment, the new element hadn't finished writing, the peer will get a old element.
-	q.Lock()
-	tail := atomic.LoadInt64(q.tail)
-	if tail-atomic.LoadInt64(q.head) >= q.cap {
-		q.Unlock()
-		return ErrQueueFull
-	}
-	queueOffset := (tail % q.cap) * queueElementLen
-	*(*uint32)(unsafe.Pointer(&q.queueBytesOnMemory[queueOffset])) = e.seqID
-	*(*uint32)(unsafe.Pointer(&q.queueBytesOnMemory[queueOffset+4])) = e.offsetInShmBuf
-	*(*uint32)(unsafe.Pointer(&q.queueBytesOnMemory[queueOffset+8])) = e.status
-	atomic.AddInt64(q.tail, 1)
-	q.Unlock()
-	return nil
-}
-
-func (q *queue) markWorking() bool {
-	return atomic.CompareAndSwapUint32(q.workingFlag, 0, 1)
-}
-
-func (q *queue) markNotWorking() bool {
-	atomic.StoreUint32(q.workingFlag, 0)
-	if q.size() == 0 {
-		return true
-	}
-	atomic.StoreUint32(q.workingFlag, 1)
-	return false
 }

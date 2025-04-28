@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -95,7 +96,7 @@ func (p *protocolAdaptor) clientGetProtocolInitializer() (initializer protocolIn
 	}
 
 	serverVersion := recvHeader.Version()
-	chosenVersion := uint8(minInt(clientVersion, int(serverVersion)))
+	chosenVersion := uint8(slices.Min([]int{clientVersion, int(serverVersion)}))
 
 	initializer, err = createProtoVersionInitializer(p.session, chosenVersion, nil)
 	if err != nil {
@@ -180,7 +181,7 @@ func handleFallbackData(s *Session, h header, buf []byte) (int, bool, error) {
 func handleExchangeVersion(s *Session, h header) error {
 	respHeader := header(make([]byte, headerSize))
 	respHeader.encode(headerSize, maxSupportProtoVersion, typeExchangeProtoVersion)
-	s.communicationVersion = uint8(minInt(int(h.Version()), int(maxSupportProtoVersion)))
+	s.communicationVersion = uint8(slices.Min([]int{int(h.Version()), int(maxSupportProtoVersion)}))
 	protocolTrace(respHeader, nil, true)
 	return blockWriteFull(s.connFd, respHeader)
 }
@@ -259,32 +260,25 @@ func handlePolling(s *Session, hdr header, buf []byte) (int, bool, error) {
 	atomic.AddUint64(&s.stats.recvPollingEventCount, 1)
 	consumedCount := 0
 	var retErr error
-	for {
-		for ele, err := s.queueManager.recvQueue.pop(); err == nil; ele, err = s.queueManager.recvQueue.pop() {
-			consumedCount++
-			state := streamState(ele.status & 0xff)
-			stream := s.getStream(ele.seqID, state)
-			if stream == nil && state == streamOpened {
-				slice, err := s.bufferManager.readBufferSlice(ele.offsetInShmBuf)
-				if err != nil {
-					return headerSize, false, err
-				}
-				s.bufferManager.recycleBuffers(slice)
-				continue
+	for ele, err := s.queueManager.recvQueue.pop(); err == nil; ele, err = s.queueManager.recvQueue.pop() {
+		consumedCount++
+		state := streamState(ele.status & 0xff)
+		stream := s.getStream(ele.seqID, state)
+		if stream == nil && state == streamOpened {
+			slice, err := s.bufferManager.readBufferSlice(ele.offsetInShmBuf)
+			if err != nil {
+				return headerSize, false, err
 			}
-			if stream == nil {
-				continue
-			}
-			retErr = s.handleStreamMessage(stream, bufferSliceWrapper{offset: ele.offsetInShmBuf}, state)
+			s.bufferManager.recycleBuffers(slice)
+			continue
 		}
-
-		runtime.Gosched()
-		if s.queueManager.recvQueue.markNotWorking() {
-			break
+		if stream == nil {
+			continue
 		}
+		retErr = s.handleStreamMessage(stream, bufferSliceWrapper{offset: ele.offsetInShmBuf}, state)
 	}
-	//followings code will bring runtime.convT64, which maybe result in GC.
-	//s.logger.infof("queue consumer consume size:%d on path:%s now wait", consumedCount, s.queueManager.path)
+	runtime.Gosched()
+	// All available items have been processed; queue is now empty.
 	return headerSize, false, retErr
 }
 

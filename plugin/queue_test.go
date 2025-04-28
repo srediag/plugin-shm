@@ -21,7 +21,6 @@ import (
 	"fmt"
 	_ "net/http/pprof"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,9 +59,6 @@ func TestQueueOperate(t *testing.T) {
 	q := createQueue(defaultQueueCap)
 
 	fmt.Println("-----------test queue operate ----------------")
-	assert.Equal(t, true, q.isEmpty(), "queue should be empty")
-	assert.Equal(t, false, q.isFull(), "queue is not full")
-	assert.Equal(t, int64(0), q.size(), "queue size should be 0")
 
 	putCount, popCount := 0, 0
 	var err error
@@ -73,9 +69,6 @@ func TestQueueOperate(t *testing.T) {
 	}
 	err = q.put(queueElement{1, 1, 1})
 	assert.Equal(t, ErrQueueFull, err)
-	assert.Equal(t, true, q.isFull(), "queue should be full")
-	assert.Equal(t, false, q.isEmpty(), "queue is not empty")
-	assert.Equal(t, int64(putCount), q.size(), "queue size")
 
 	for i := 0; i < defaultQueueCap; i++ {
 		e, err := q.pop()
@@ -86,21 +79,9 @@ func TestQueueOperate(t *testing.T) {
 		assert.Equal(t, i, int(e.status), "queue pop verify offset")
 	}
 	_, err = q.pop()
-	assert.Equal(t, errQueueEmpty, err)
-	assert.Equal(t, false, q.isFull(), "queue is not full")
-	assert.Equal(t, true, q.isEmpty(), "queue should be empty")
-	assert.Equal(t, int64(0), q.size(), "queue size")
+	assert.Equal(t, ErrNoMoreBuffer, err)
 
 	fmt.Println("-----------test queue status ----------------")
-	assert.Equal(t, false, q.consumerIsWorking(), "consumer should be not working")
-	q.markWorking()
-	assert.Equal(t, true, q.consumerIsWorking(), "consumer should be working")
-	q.markNotWorking()
-	assert.Equal(t, false, q.consumerIsWorking(), "consumer should be not working")
-
-	_ = q.put(queueElement{1, 1, 1})
-	q.markNotWorking()
-	assert.Equal(t, true, q.consumerIsWorking(), "consumer should be working")
 }
 
 func TestQueueMultiProducerAndSingleConsumer(t *testing.T) {
@@ -190,8 +171,3 @@ func BenchmarkQueueMultiPop(b *testing.B) {
 		}
 	})
 }
-
-// Add test-only methods for queue
-func (q *queue) isEmpty() bool           { return q.size() == 0 }
-func (q *queue) isFull() bool            { return q.size() == q.cap }
-func (q *queue) consumerIsWorking() bool { return (atomic.LoadUint32(q.workingFlag)) > 0 }

@@ -141,7 +141,7 @@ func (s *SessionTestSuite) TestSession_OpenStream() {
 
 	// case3: stream exist
 	client3, server3 := testClientServer()
-	client3.streams[client3.nextStreamID+1] = newStream(client3, client3.nextStreamID+1)
+	client3.streams.Set(strconv.Itoa(int(client3.nextStreamID+1)), newStream(client3, client3.nextStreamID+1))
 	stream3, err := client3.OpenStream()
 	s.Require().Nil(stream3)
 	s.Require().Equal(ErrStreamsExhausted, err)
