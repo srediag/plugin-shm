@@ -228,7 +228,7 @@ func (s *Stream) Flush(endStream bool) error {
 		atomic.AddUint64(&s.session.stats.queueFullErrorCount, 1)
 		var writeDeadlineCh <-chan time.Time
 		if !s.writeDeadline.IsZero() {
-			writeDeadlineCh = time.NewTimer(s.writeDeadline.Sub(time.Now())).C
+			writeDeadlineCh = time.NewTimer(time.Until(s.writeDeadline)).C
 		}
 		//retry 10 times.
 		for i := 0; err == ErrQueueFull && i < 10; i++ {

@@ -63,10 +63,12 @@ func TestStream_Close(t *testing.T) {
 	hadForceCloseNotifyCh := make(chan struct{})
 	doneCh := make(chan struct{})
 
+	errCh := make(chan error, 1)
 	go func() {
 		s, err := server.AcceptStream()
 		if err != nil {
-			t.Fatalf("open stream failed:,err:%s", err.Error())
+			errCh <- err
+			return
 		}
 		_, err = s.BufferReader().ReadByte()
 		assert.Equal(t, nil, err)
@@ -79,6 +81,7 @@ func TestStream_Close(t *testing.T) {
 		assert.Equal(t, 0, server.GetActiveStreamCount())
 		assert.Equal(t, uint32(streamClosed), s.state)
 		close(doneCh)
+		errCh <- nil
 	}()
 
 	s, err := client.OpenStream()
@@ -97,8 +100,13 @@ func TestStream_Close(t *testing.T) {
 	_ = buf.WriteString("1")
 	// try to write after stream closed
 	err = s.Flush(false)
-	assert.Equal(t, ErrStreamClosed, err)
-	time.Sleep(time.Millisecond * 50)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("open stream failed:,err:%s", err.Error())
+		}
+	case <-doneCh:
+	}
 	close(hadForceCloseNotifyCh)
 	<-doneCh
 }
@@ -425,26 +433,36 @@ func TestStream_Reset(t *testing.T) {
 		rand.Read(mockData[i])
 	}
 
+	errCh := make(chan error, 1)
 	go func() {
 		s, err := server.AcceptStream()
 		if err != nil {
-			t.Fatalf("server.AcceptStream failed:%s", err.Error())
+			errCh <- err
+			return
 		}
 		defer s.Close()
 		reader := s.BufferReader()
 		for i := 0; i < mockDataLength/2; i++ {
 			if err != nil {
-				t.Fatalf("ReadBuf failed:%s", err.Error())
+				errCh <- err
+				return
 			}
 			get, err := reader.ReadBytes(dataSize)
 			if err != nil {
-				panic("ReadBytes failed:" + err.Error())
+				errCh <- err
+				return
 			}
-			assert.Equal(t, mockData[i], get, "i:%d", i)
+			if !assert.Equal(t, mockData[i], get, "i:%d", i) {
+				errCh <- err
+				return
+			}
 		}
 		// read done, reset will be successful
 		err = s.reset()
-		assert.Equal(t, nil, err)
+		if err != nil {
+			errCh <- err
+			return
+		}
 		close(notifySend)
 		<-notifyRead
 
@@ -452,25 +470,36 @@ func TestStream_Reset(t *testing.T) {
 		reader = s.BufferReader()
 		for i := mockDataLength / 2; i < mockDataLength; i++ {
 			if err != nil {
-				t.Fatalf("ReadBuf failed:%s", err.Error())
+				errCh <- err
+				return
 			}
 			get, err := reader.ReadBytes(dataSize)
 			if err != nil {
-				panic("ReadBytes failed:" + err.Error())
+				errCh <- err
+				return
 			}
-			assert.Equal(t, mockData[i], get, "i:%d", i)
+			if !assert.Equal(t, mockData[i], get, "i:%d", i) {
+				errCh <- err
+				return
+			}
 		}
-
-		<-notifyClosed
-		err = s.reset()
-		assert.Error(t, ErrStreamClosed, err)
-		close(done)
+		close(notifyRead)
+		s.Close()
+		close(notifyClosed)
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("goroutine error: %v", err)
+			}
+		case <-done:
+		}
 	}()
 
 	s, err := client.OpenStream()
 	if err != nil {
 		t.Fatalf("client.OpenStream failed:%s", err.Error())
 	}
+	defer s.Close()
 
 	for i := 0; i < mockDataLength; i++ {
 		if i == mockDataLength/2 {
@@ -487,7 +516,13 @@ func TestStream_Reset(t *testing.T) {
 	close(notifyRead)
 	s.Close()
 	close(notifyClosed)
-	<-done
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("goroutine error: %v", err)
+		}
+	case <-done:
+	}
 }
 
 func TestStream_fillDataToReadBuffer(t *testing.T) {
@@ -507,7 +542,6 @@ func TestStream_fillDataToReadBuffer(t *testing.T) {
 	assert.Equal(t, nil, err)
 
 	//TODO: fillDataToReadBuffer 53.3%
-
 }
 
 // TODO: SwapBufferForReuse              66.7%

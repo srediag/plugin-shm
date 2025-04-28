@@ -160,7 +160,7 @@ func mustWrite(s *Stream, size int, b *testing.B) {
 }
 
 func mustRead(s *Stream, size int, b *testing.B) bool {
-	n, err := s.BufferReader().Discard(size)
+	_, err := s.BufferReader().Discard(size)
 	if err == ErrStreamClosed || err == ErrEndOfStream {
 		return false
 	} else if err != nil {
@@ -183,12 +183,13 @@ func benchmarkParallelPingPongByShmipc(b *testing.B, reqSize, respSize int) {
 	b.RunParallel(func(pb *testing.PB) {
 		hasNext := pb.Next()
 		doneCh := make(chan struct{})
+		errCh := make(chan error, 1)
 		if hasNext {
 			go func() {
 				defer close(doneCh)
 				stream, err := server.AcceptStream()
 				if err != nil {
-					b.Fatalf("accept error:%s", err.Error())
+					errCh <- fmt.Errorf("accept error:%s", err.Error())
 					return
 				}
 				defer stream.Close()
@@ -205,8 +206,6 @@ func benchmarkParallelPingPongByShmipc(b *testing.B, reqSize, respSize int) {
 				b.Fatalf("err: %v", err)
 			}
 			for ; hasNext; hasNext = pb.Next() {
-				//wg.Add(1)
-				//fmt.Println("send")
 				mustWrite(stream, reqSize, b)
 				mustRead(stream, respSize, b)
 				stream.ReleaseReadAndReuse()
@@ -214,6 +213,13 @@ func benchmarkParallelPingPongByShmipc(b *testing.B, reqSize, respSize int) {
 			// make server side stream could receive notification.
 			stream.Close()
 			<-doneCh
+			select {
+			case err := <-errCh:
+				if err != nil {
+					b.Fatalf("%v", err)
+				}
+			default:
+			}
 		}
 	})
 }

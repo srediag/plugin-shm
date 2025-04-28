@@ -25,8 +25,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const udsPath = "/tmp/plugin.sock"
-
 func TestProtocolCompatibilityForNetUnixConn(t *testing.T) {
 	//testProtocolCompatibility(t, MemMapTypeDevShmFile)
 	testProtocolCompatibility(t, MemMapTypeMemFd)

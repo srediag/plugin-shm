@@ -21,6 +21,7 @@ import (
 	"fmt"
 	_ "net/http/pprof"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,11 @@ var (
 	queueCap    = 1000000
 	parallelism = 100
 )
+
+// createQueue is needed for tests in this file only
+func createQueue(cap uint32) *queue {
+	return createQueueFromBytes(make([]byte, queueHeaderLength+int(cap*queueElementLen)), cap)
+}
 
 func TestQueueManager_CreateMapping(t *testing.T) {
 	path := "/tmp/ipc.queue"
@@ -178,3 +184,8 @@ func BenchmarkQueueMultiPop(b *testing.B) {
 		}
 	})
 }
+
+// Add test-only methods for queue
+func (q *queue) isEmpty() bool           { return q.size() == 0 }
+func (q *queue) isFull() bool            { return q.size() == q.cap }
+func (q *queue) consumerIsWorking() bool { return (atomic.LoadUint32(q.workingFlag)) > 0 }

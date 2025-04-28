@@ -27,6 +27,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// maxInt is needed for tests in this file only
+func maxInt(a, b int) int {
+	if a < b {
+		return b
+	}
+	return a
+}
+
 func TestAsyncSendErr(t *testing.T) {
 	ch := make(chan error)
 	asyncSendErr(ch, ErrTimeout)

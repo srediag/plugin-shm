@@ -73,7 +73,6 @@ type Session struct {
 	handshakeDone bool
 	unhealthy     uint32
 	writing       uint32
-	waitWrite     int32
 
 	bufferManager *bufferManager
 	queueManager  *queueManager

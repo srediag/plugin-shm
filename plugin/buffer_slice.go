@@ -134,10 +134,6 @@ func (s *bufferSlice) remain() int {
 	return int(s.cap) - s.writeIndex
 }
 
-func (s *bufferSlice) capacity() int {
-	return int(s.cap)
-}
-
 func (s *bufferSlice) reserve(size int) ([]byte, error) {
 	start := s.writeIndex
 	remain := s.remain()
@@ -146,10 +142,6 @@ func (s *bufferSlice) reserve(size int) ([]byte, error) {
 		return s.data[start:s.writeIndex], nil
 	}
 	return nil, ErrNoMoreBuffer
-}
-
-func (s *bufferSlice) prepend() {
-	panic("TODO")
 }
 
 func (s *bufferSlice) append(data ...byte) int {

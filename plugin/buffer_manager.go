@@ -462,23 +462,6 @@ func (b *bufferList) push(buffer *bufferSlice) {
 	}
 }
 
-func (b *bufferList) remain() int {
-	//when the size is 1, not allow pop for solving problem about concurrent operating.
-	return int(atomic.LoadInt32(b.size) - 1)
-}
-
-func (b *bufferManager) remainSize() uint32 {
-	var result uint32
-	for _, pair := range b.lists {
-		remain := int(*pair.size) * int(*pair.capPerBuffer)
-		if remain > 0 {
-			result += uint32(remain)
-		}
-	}
-
-	return result
-}
-
 // alloc single buffer slice , whose performance better than allocShmBuffers.
 func (b *bufferManager) allocShmBuffer(size uint32) (*bufferSlice, error) {
 	if size <= b.maxSliceSize {

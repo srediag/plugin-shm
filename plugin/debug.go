@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -131,13 +130,6 @@ func (l *logger) warnf(format string, a ...interface{}) {
 	fmt.Fprintf(l.out, l.prefix(levelWarn)+format+reset+"\n", a...)
 }
 
-func (l *logger) warn(v interface{}) {
-	if level > levelWarn {
-		return
-	}
-	fmt.Fprintln(l.out, l.prefix(levelWarn), v, reset)
-}
-
 func (l *logger) infof(format string, a ...interface{}) {
 	if level > levelInfo {
 		return
@@ -159,26 +151,12 @@ func (l *logger) debugf(format string, a ...interface{}) {
 	fmt.Fprintf(l.out, l.prefix(levelDebug)+format+reset+"\n", a...)
 }
 
-func (l *logger) debug(v interface{}) {
-	if level > levelDebug {
-		return
-	}
-	fmt.Fprintln(l.out, l.prefix(levelDebug), v, reset)
-}
-
 func (l *logger) tracef(format string, a ...interface{}) {
 	if level > levelTrace {
 		return
 	}
 	//todo optimized
 	fmt.Fprintf(l.out, l.prefix(levelTrace)+format+reset+"\n", a...)
-}
-
-func (l *logger) trace(v interface{}) {
-	if level > levelTrace {
-		return
-	}
-	fmt.Fprintln(l.out, l.prefix(levelTrace), v, reset)
 }
 
 func (l *logger) prefix(level int) string {
@@ -233,7 +211,7 @@ func computeFreeSliceNum(list *bufferList) int {
 // 1.occurred memory leak, if list's free slice number != expect free slice number.
 // 2.print the metadata and payload of the leaked slice.
 func debugBufferListDetail(path string, bufferMgrHeaderSize int, bufferHeaderSize int) {
-	mem, err := ioutil.ReadFile(path)
+	mem, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -260,9 +238,7 @@ func printLeakShareMemory(bm *bufferManager, bufferMgrHeaderSize int, bufferHead
 		offsetInShm += bufferListHeaderSize
 		data := bm.lists[i].bufferRegion
 		offset := 0
-		realSize := 0
 		for offset < len(data) {
-			realSize++
 			bh := bufferHeader(data[offset:])
 			size := int(*(*uint32)(unsafe.Pointer(&data[offset+bufferSizeOffset])))
 			flag := int(*(*uint8)(unsafe.Pointer(&data[offset+bufferFlagOffset])))
@@ -287,7 +263,7 @@ func DebugBufferListDetail(path string) {
 
 // DebugQueueDetail print IO-Queue's status which was mmap in the `path`
 func DebugQueueDetail(path string) {
-	mem, err := ioutil.ReadFile(path)
+	mem, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Println(err)
 		return

@@ -20,7 +20,6 @@ package plugin
 import (
 	"errors"
 	"fmt"
-	"net"
 )
 
 var (
@@ -46,7 +45,6 @@ type protocolInitializer interface {
 
 type protocolInitializerV2 struct {
 	session    *Session
-	netConn    net.Conn
 	firstEvent header
 }
 

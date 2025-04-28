@@ -48,8 +48,8 @@ func TestBufferSlice_ReadWrite(t *testing.T) {
 
 func TestBufferSlice_Skip(t *testing.T) {
 	slice := newBufferSlice(nil, make([]byte, 8192), 0, false)
-	slice.append(make([]byte, slice.capacity())...)
-	remain := slice.capacity()
+	slice.append(make([]byte, slice.cap)...)
+	remain := int(slice.cap)
 
 	n := slice.skip(10)
 	remain -= n
@@ -59,7 +59,7 @@ func TestBufferSlice_Skip(t *testing.T) {
 	remain -= n
 	assert.Equal(t, remain, slice.size())
 
-	n = slice.skip(10000)
+	_ = slice.skip(10000)
 	assert.Equal(t, 0, slice.size())
 }
 
@@ -142,7 +142,7 @@ func TestBufferSlice_linkedNext(t *testing.T) {
 	for i := 0; i < sliceNum; i++ {
 		s, err := bm.readBufferSlice(next)
 		assert.Equal(t, nil, err)
-		assert.Equal(t, size, s.capacity())
+		assert.Equal(t, size, s.cap)
 		assert.Equal(t, size, s.size())
 		readData, err := s.read(size)
 		assert.Equal(t, nil, err, "i:%d offset:%d", i, next)

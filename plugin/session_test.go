@@ -40,7 +40,7 @@ func testConn() (*net.UnixConn, *net.UnixConn) {
 func testUdsConn() (client *net.UnixConn, server *net.UnixConn) {
 	udsPath := "shmipc_unit_test" + strconv.Itoa(int(rand.Int63())) + "_" + strconv.Itoa(time.Now().Nanosecond())
 	_ = syscall.Unlink(udsPath)
-	addr := &net.UnixAddr{udsPath, "unix"}
+	addr := &net.UnixAddr{Net: "unix", Name: udsPath}
 	notifyCh := make(chan struct{})
 	go func() {
 		defer func() {

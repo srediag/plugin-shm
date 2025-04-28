@@ -1,5 +1,4 @@
 //go:build !race
-// +build !race
 
 /*
  * * * Copyright 2025 SREDiag Authors
@@ -269,7 +268,6 @@ type epollDispatcher struct {
 	conns          map[int]*connEventHandler
 	lock           sync.Mutex
 	waitLoopExitWg sync.WaitGroup
-	toCloseConns   []*connEventHandler
 	pendingLambda  []func()
 	runningLambda  []func()
 	lambdaLock     sync.Mutex

@@ -18,7 +18,6 @@
 package plugin
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -90,7 +89,7 @@ func createQueueManager(shmPath string, queueCap uint32) (*queueManager, error) 
 	//ignore mkdir error
 	_ = os.MkdirAll(filepath.Dir(shmPath), os.ModePerm)
 	if pathExists(shmPath) {
-		return nil, errors.New("queue was existed,path" + shmPath)
+		return nil, fmt.Errorf("queue was existed,path" + shmPath)
 	}
 	memSize := countQueueMemSize(queueCap) * queueCount
 	if !canCreateOnDevShm(uint64(memSize), shmPath) {
@@ -209,11 +208,6 @@ func mappingQueueFromBytes(data []byte) *queue {
 	}
 }
 
-// cap prefer equals 2^n
-func createQueue(cap uint32) *queue {
-	return createQueueFromBytes(make([]byte, queueHeaderLength+int(cap*queueElementLen)), cap)
-}
-
 func (q *queueManager) unmap() {
 	if err := syscall.Munmap(q.mem); err != nil {
 		internalLogger.warnf("queueManager unmap error:" + err.Error())
@@ -231,14 +225,6 @@ func (q *queueManager) unmap() {
 			internalLogger.infof("queueManager close queue fd:%d", q.memFd)
 		}
 	}
-}
-
-func (q *queue) isFull() bool {
-	return q.size() == q.cap
-}
-
-func (q *queue) isEmpty() bool {
-	return q.size() == 0
 }
 
 func (q *queue) size() int64 {
@@ -277,10 +263,6 @@ func (q *queue) put(e queueElement) error {
 	atomic.AddInt64(q.tail, 1)
 	q.Unlock()
 	return nil
-}
-
-func (q *queue) consumerIsWorking() bool {
-	return (atomic.LoadUint32(q.workingFlag)) > 0
 }
 
 func (q *queue) markWorking() bool {

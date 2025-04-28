@@ -25,16 +25,16 @@ func TestLogColor(t *testing.T) {
 	SetLogLevel(levelTrace)
 
 	internalLogger.tracef("this is tracef %s", "hello world")
-	internalLogger.trace("this is trace")
+	internalLogger.tracef("trace message")
 
 	internalLogger.infof("this is infof %s", "hello world")
 	internalLogger.info("this is info")
 
 	internalLogger.debugf("this is debugf %s", "hello world")
-	internalLogger.debug("this is debug")
+	internalLogger.debugf("debug message")
 
 	internalLogger.warnf("this is warnf %s", "hello world")
-	internalLogger.warn("this is warn")
+	internalLogger.warnf("warn message")
 
 	internalLogger.errorf("this is errorf %s", "hello world")
 	internalLogger.error("this is error")

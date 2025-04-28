@@ -48,7 +48,7 @@ func handleConn(conn net.Conn) {
 			return
 		}
 		req.Deserialize(readBuffer[:n])
-		idl.BufferPool.Put(readBuffer)
+		idl.BufferPool.Put(interface{}(readBuffer))
 
 		{
 			//2.handle request
@@ -61,7 +61,7 @@ func handleConn(conn net.Conn) {
 		resp.Image = req.Key
 		writeBuffer := req.Serialize()
 		idl.MustWrite(conn, writeBuffer)
-		idl.BufferPool.Put(writeBuffer)
+		idl.BufferPool.Put(&writeBuffer)
 
 		req.Reset()
 		resp.Reset()
@@ -108,5 +108,4 @@ func main() {
 		go handleConn(conn)
 	}
 
-	fmt.Println("shmipc server exited")
 }

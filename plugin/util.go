@@ -19,12 +19,10 @@ package plugin
 
 import (
 	"os"
-	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/shirou/gopsutil/v3/disk"
 )
@@ -59,12 +57,12 @@ func asyncNotify(ch chan struct{}) {
 }
 
 // min computes the minimum of two values
-func min(a, b uint32) uint32 {
-	if a < b {
-		return a
-	}
-	return b
-}
+// func min(a, b uint32) uint32 {
+// 	if a < b {
+// 		return a
+// 	}
+// 	return b
+// }
 
 func minInt(a, b int) int {
 	if a < b {
@@ -73,23 +71,25 @@ func minInt(a, b int) int {
 	return b
 }
 
-func maxInt(a, b int) int {
-	if a < b {
-		return b
-	}
-	return a
-}
+// maxInt computes the maximum of two values
+// func maxInt(a, b int) int {
+// 	if a < b {
+// 		return b
+// 	}
+// 	return a
+// }
 
 func string2bytesZeroCopy(s string) []byte {
-	stringHeader := (*reflect.StringHeader)(unsafe.Pointer(&s))
+	// stringHeader := (*reflect.StringHeader)(unsafe.Pointer(&s))
 
-	bh := reflect.SliceHeader{
-		Data: stringHeader.Data,
-		Len:  stringHeader.Len,
-		Cap:  stringHeader.Len,
-	}
+	// bh := reflect.SliceHeader{
+	// 	Data: stringHeader.Data,
+	// 	Len:  stringHeader.Len,
+	// 	Cap:  stringHeader.Len,
+	// }
 
-	return *(*[]byte)(unsafe.Pointer(&bh))
+	// return *(*[]byte)(unsafe.Pointer(&bh))
+	return []byte(s)
 }
 
 func pathExists(path string) bool {
