@@ -21,17 +21,17 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/cloudwego/shmipc-go"
+	"github.com/srediag/plugin-shm/plugin"
 )
 
 var (
-	_ shmipc.ListenCallback  = &listenCbImpl{}
-	_ shmipc.StreamCallbacks = &streamCbImpl{}
+	_ plugin.ListenCallback  = &listenCbImpl{}
+	_ plugin.StreamCallbacks = &streamCbImpl{}
 )
 
 type listenCbImpl struct{}
 
-func (l listenCbImpl) OnNewStream(s *shmipc.Stream) {
+func (l listenCbImpl) OnNewStream(s *plugin.Stream) {
 	//fmt.Printf("OnNewStream StreamID %d\n", s.StreamID())
 	if err := s.SetCallbacks(streamCbImpl{stream: s}); err != nil {
 		fmt.Printf("OnNewStream SetCallbacks error %+v\n", err)
@@ -43,10 +43,10 @@ func (l listenCbImpl) OnShutdown(reason string) {
 }
 
 type streamCbImpl struct {
-	stream *shmipc.Stream
+	stream *plugin.Stream
 }
 
-func (s streamCbImpl) OnData(reader shmipc.BufferReader) {
+func (s streamCbImpl) OnData(reader plugin.BufferReader) {
 	ret, err := reader.ReadString(len(sendStr))
 	if err != nil {
 		fmt.Printf("OnData stream ReadString request error %+v\n", err)

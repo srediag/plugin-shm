@@ -27,7 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cloudwego/shmipc-go"
+	"github.com/srediag/plugin-shm/plugin"
 )
 
 var (
@@ -69,17 +69,17 @@ func main() {
 	}
 
 	// 2. init session manager
-	conf := shmipc.DefaultSessionManagerConfig()
+	conf := plugin.DefaultSessionManagerConfig()
 	conf.Address = filepath.Join(dir, "../ipc_test.sock")
 	conf.Network = "unix"
 	conf.SessionNum = 4
 	conf.ShareMemoryBufferCap = 32 << 20
-	//conf.MemMapType = shmipc.MemMapTypeMemFd
-	conf.MemMapType = shmipc.MemMapTypeDevShmFile
+	//conf.MemMapType = plugin.MemMapTypeMemFd
+	conf.MemMapType = plugin.MemMapTypeDevShmFile
 	if os.Getenv("PATH_PREFIX") != "" {
 		conf.ShareMemoryPathPrefix = os.Getenv("PATH_PREFIX")
 	}
-	smgr, err := shmipc.InitGlobalSessionManager(conf)
+	smgr, err := plugin.InitGlobalSessionManager(conf)
 	if err != nil {
 		panic(err)
 	}

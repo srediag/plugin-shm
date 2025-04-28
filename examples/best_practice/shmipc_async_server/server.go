@@ -28,19 +28,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudwego/shmipc-go"
-	"github.com/srediag/plugin-shm/example/best_practice/idl"
+	"github.com/srediag/plugin-shm/examples/best_practice/idl"
+	"github.com/srediag/plugin-shm/plugin"
 )
 
 var (
 	count uint64
-	_     shmipc.StreamCallbacks = &streamCbImpl{}
-	_     shmipc.ListenCallback  = &listenCbImpl{}
+	_     plugin.StreamCallbacks = &streamCbImpl{}
+	_     plugin.ListenCallback  = &listenCbImpl{}
 )
 
 type listenCbImpl struct{}
 
-func (l *listenCbImpl) OnNewStream(s *shmipc.Stream) {
+func (l *listenCbImpl) OnNewStream(s *plugin.Stream) {
 	s.SetCallbacks(&streamCbImpl{stream: s})
 }
 
@@ -51,10 +51,10 @@ func (l *listenCbImpl) OnShutdown(reason string) {
 type streamCbImpl struct {
 	req    idl.Request
 	resp   idl.Response
-	stream *shmipc.Stream
+	stream *plugin.Stream
 }
 
-func (s *streamCbImpl) OnData(reader shmipc.BufferReader) {
+func (s *streamCbImpl) OnData(reader plugin.BufferReader) {
 	//1.deserialize Request
 	if err := s.req.ReadFromShm(reader); err != nil {
 		fmt.Println("stream read request, err=" + err.Error())
@@ -116,8 +116,8 @@ func main() {
 	udsPath := filepath.Join(dir, "../ipc_test.sock")
 
 	_ = syscall.Unlink(udsPath)
-	config := shmipc.NewDefaultListenerConfig(udsPath, "unix")
-	ln, err := shmipc.NewListener(&listenCbImpl{}, config)
+	config := plugin.NewDefaultListenerConfig(udsPath, "unix")
+	ln, err := plugin.NewListener(&listenCbImpl{}, config)
 	if err != nil {
 		fmt.Println(err)
 		return

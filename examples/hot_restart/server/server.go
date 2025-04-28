@@ -31,7 +31,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudwego/shmipc-go"
+	"github.com/srediag/plugin-shm/plugin"
 )
 
 var (
@@ -113,7 +113,7 @@ func listenFD(ln net.Listener) (fd int, f *os.File) {
 }
 
 // admin handle hotrestart
-func listenAdmin(svr *shmipc.Listener, admin net.Listener) {
+func listenAdmin(svr *plugin.Listener, admin net.Listener) {
 	// step 1. accept connection, begin hotrestart
 	adminln, ok := admin.(*net.UnixListener)
 	if !ok {
@@ -220,8 +220,8 @@ func start() {
 	fmt.Printf("server normal start\n")
 
 	// step 1. create shmipc listener
-	config := shmipc.NewDefaultListenerConfig(udsPath, "unix")
-	shmipcListener, err := shmipc.NewListener(&listenCbImpl{}, config)
+	config := plugin.NewDefaultListenerConfig(udsPath, "unix")
+	shmipcListener, err := plugin.NewListener(&listenCbImpl{}, config)
 	if err != nil {
 		panic(fmt.Errorf("shmipc NewListener error %+v", err))
 	}
@@ -276,8 +276,8 @@ func restart() {
 	fmt.Println("rebuildListener adminln.addr ", adminln.Addr())
 
 	// step 4. create new shmipc listener
-	config := shmipc.NewDefaultListenerConfig(udsPath, "unix")
-	srvLn, err := shmipc.NewListener(&listenCbImpl{}, config)
+	config := plugin.NewDefaultListenerConfig(udsPath, "unix")
+	srvLn, err := plugin.NewListener(&listenCbImpl{}, config)
 	if err != nil {
 		fmt.Println(err)
 		return

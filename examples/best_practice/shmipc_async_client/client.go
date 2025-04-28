@@ -29,13 +29,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cloudwego/shmipc-go"
-	"github.com/srediag/plugin-shm/example/best_practice/idl"
+	"github.com/srediag/plugin-shm/examples/best_practice/idl"
+	"github.com/srediag/plugin-shm/plugin"
 )
 
 var (
 	count uint64
-	_     shmipc.StreamCallbacks = &streamCbImpl{}
+	_     plugin.StreamCallbacks = &streamCbImpl{}
 )
 
 func init() {
@@ -57,14 +57,14 @@ func init() {
 type streamCbImpl struct {
 	req    idl.Request
 	resp   idl.Response
-	stream *shmipc.Stream
-	smgr   *shmipc.SessionManager
+	stream *plugin.Stream
+	smgr   *plugin.SessionManager
 	key    []byte
 	loop   uint64
 	n      uint64
 }
 
-func (s *streamCbImpl) OnData(reader shmipc.BufferReader) {
+func (s *streamCbImpl) OnData(reader plugin.BufferReader) {
 	//wait and read response
 	s.resp.Reset()
 	if err := s.resp.ReadFromShm(reader); err != nil {
@@ -118,13 +118,13 @@ func main() {
 	}
 
 	// 2. init session manager
-	conf := shmipc.DefaultSessionManagerConfig()
+	conf := plugin.DefaultSessionManagerConfig()
 	conf.Address = filepath.Join(dir, "../ipc_test.sock")
 	conf.Network = "unix"
 	conf.SessionNum = 1
 	conf.ShareMemoryBufferCap = 32 << 20
-	conf.MemMapType = shmipc.MemMapTypeMemFd
-	smgr, err := shmipc.InitGlobalSessionManager(conf)
+	conf.MemMapType = plugin.MemMapTypeMemFd
+	smgr, err := plugin.InitGlobalSessionManager(conf)
 	if err != nil {
 		panic(err)
 	}

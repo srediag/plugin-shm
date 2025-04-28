@@ -22,7 +22,7 @@ import (
 	"net"
 	"sync"
 
-	shm "github.com/srediag/plugin-shm/transport/shm"
+	plugin "github.com/srediag/plugin-shm/plugin"
 )
 
 // the idl is the Request struct and Response struct.
@@ -40,7 +40,7 @@ type Response struct {
 	Image []byte
 }
 
-func (r *Request) ReadFromShm(reader shm.BufferReader) error {
+func (r *Request) ReadFromShm(reader plugin.BufferReader) error {
 	//1.read ID
 	data, err := reader.ReadBytes(8)
 	if err != nil {
@@ -78,7 +78,7 @@ func (r *Request) ReadFromShm(reader shm.BufferReader) error {
 	return nil
 }
 
-func (r *Request) WriteToShm(writer shm.BufferWriter) error {
+func (r *Request) WriteToShm(writer plugin.BufferWriter) error {
 	//1.write ID
 	data, err := writer.Reserve(8)
 	if err != nil {
@@ -152,7 +152,7 @@ func (r *Request) Reset() {
 	r.Key = r.Key[:0]
 }
 
-func (r *Response) ReadFromShm(reader shm.BufferReader) error {
+func (r *Response) ReadFromShm(reader plugin.BufferReader) error {
 	//1.read ID
 	data, err := reader.ReadBytes(8)
 	if err != nil {
@@ -230,7 +230,7 @@ func (r *Response) Serialize() []byte {
 	return data[:offset]
 }
 
-func (r *Response) WriteToShm(writer shm.BufferWriter) error {
+func (r *Response) WriteToShm(writer plugin.BufferWriter) error {
 	//1.write ID
 	data, err := writer.Reserve(8)
 	if err != nil {

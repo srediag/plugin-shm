@@ -29,8 +29,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cloudwego/shmipc-go"
-	"github.com/srediag/plugin-shm/example/best_practice/idl"
+	"github.com/srediag/plugin-shm/examples/best_practice/idl"
+	"github.com/srediag/plugin-shm/plugin"
 )
 
 var count uint64
@@ -66,13 +66,13 @@ func main() {
 	}
 
 	// 2. init session manager
-	conf := shmipc.DefaultSessionManagerConfig()
+	conf := plugin.DefaultSessionManagerConfig()
 	conf.Address = filepath.Join(dir, "../ipc_test.sock")
 	conf.Network = "unix"
-	conf.MemMapType = shmipc.MemMapTypeMemFd
+	conf.MemMapType = plugin.MemMapTypeMemFd
 	conf.SessionNum = 1
 	conf.InitializeTimeout = 100 * time.Second
-	smgr, err := shmipc.NewSessionManager(conf)
+	smgr, err := plugin.NewSessionManager(conf)
 	if err != nil {
 		panic(err)
 	}

@@ -23,7 +23,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/cloudwego/shmipc-go"
+	"github.com/srediag/plugin-shm/plugin"
 )
 
 func main() {
@@ -34,7 +34,7 @@ func main() {
 	udsPath := filepath.Join(dir, "../ipc_test.sock")
 
 	// 1.create client session manager
-	conf := shmipc.DefaultSessionManagerConfig()
+	conf := plugin.DefaultSessionManagerConfig()
 	conf.ShareMemoryPathPrefix = "/dev/shm/client.ipc.shm"
 	conf.Network = "unix"
 	conf.Address = udsPath
@@ -43,7 +43,7 @@ func main() {
 		conf.QueuePath = "/tmp/client.ipc.shm_queue"
 	}
 
-	s, err := shmipc.NewSessionManager(conf)
+	s, err := plugin.NewSessionManager(conf)
 	if err != nil {
 		panic("create client session failed, " + err.Error())
 	}

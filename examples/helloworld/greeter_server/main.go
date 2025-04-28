@@ -25,7 +25,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudwego/shmipc-go"
+	"github.com/srediag/plugin-shm/plugin"
 )
 
 func main() {
@@ -51,8 +51,8 @@ func main() {
 	defer conn.Close()
 
 	// 3. create server session
-	conf := shmipc.DefaultConfig()
-	s, err := shmipc.Server(conn, conf)
+	conf := plugin.DefaultConfig()
+	s, err := plugin.Server(conn, conf)
 	if err != nil {
 		panic("new ipc server failed " + err.Error())
 	}

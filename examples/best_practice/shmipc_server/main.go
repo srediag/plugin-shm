@@ -29,13 +29,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudwego/shmipc-go"
-	"github.com/srediag/plugin-shm/example/best_practice/idl"
+	"github.com/srediag/plugin-shm/examples/best_practice/idl"
+	"github.com/srediag/plugin-shm/plugin"
 )
 
 var count uint64
 
-func handleStream(s *shmipc.Stream) {
+func handleStream(s *plugin.Stream) {
 	req := &idl.Request{}
 	resp := &idl.Response{}
 	for {
@@ -108,8 +108,8 @@ func main() {
 			defer conn.Close()
 
 			// 3. create server session
-			conf := shmipc.DefaultConfig()
-			server, err := shmipc.Server(conn, conf)
+			conf := plugin.DefaultConfig()
+			server, err := plugin.Server(conn, conf)
 			if err != nil {
 				panic("new ipc server failed " + err.Error())
 			}

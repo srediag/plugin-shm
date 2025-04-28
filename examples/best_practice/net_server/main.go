@@ -29,7 +29,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/srediag/plugin-shm/example/best_practice/idl"
+	"github.com/srediag/plugin-shm/examples/best_practice/idl"
 )
 
 var count uint64
