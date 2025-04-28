@@ -489,16 +489,17 @@ func (b *bufferList) push(buffer *bufferSlice) {
 func (b *bufferManager) allocShmBuffer(size uint32) (*bufferSlice, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if size <= b.maxSliceSize {
-		for i := range b.lists {
-			if size <= *b.lists[i].capPerBuffer {
-				buf, err := b.lists[i].pop()
-				if err != nil {
-					continue
-				}
-				return buf, nil
+	for i := range b.lists {
+		if size == *b.lists[i].capPerBuffer {
+			buf, err := b.lists[i].pop()
+			if err != nil {
+				internalLogger.debugf("allocShmBuffer: pool exato poolIdx=%d poolCap=%d esgotado", i, *b.lists[i].capPerBuffer)
+				continue
 			}
+			internalLogger.debugf("allocShmBuffer: alocado buffer offsetInShm=%d cap=%d poolIdx=%d poolCap=%d (exato)", buf.offsetInShm, buf.cap, i, *b.lists[i].capPerBuffer)
+			return buf, nil
 		}
+		internalLogger.debugf("allocShmBuffer: ignorando poolIdx=%d poolCap=%d para size=%d", i, *b.lists[i].capPerBuffer, size)
 	}
 	return nil, ErrNoMoreBuffer
 }
@@ -507,12 +508,20 @@ func (b *bufferManager) allocShmBuffers(slices *sliceList, size uint32) (allocSi
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	remain := int64(size)
+	// DEBUG: garantir unicidade dos offsets
+	offsetSet := make(map[uint32]struct{})
 	for i := len(b.lists) - 1; i >= 0 && remain > 0; i-- {
 		for remain > 0 {
 			buf, err := b.lists[i].pop()
 			if err != nil {
 				break
 			}
+			if _, exists := offsetSet[buf.offsetInShm]; exists {
+				internalLogger.errorf("allocShmBuffers: slice duplicado offsetInShm=%d, interrompendo alocação", buf.offsetInShm)
+				return allocSize
+			}
+			offsetSet[buf.offsetInShm] = struct{}{}
+			internalLogger.debugf("allocShmBuffers: alocado slice offsetInShm=%d", buf.offsetInShm)
 			slices.pushBack(buf)
 			allocSize += int64(buf.cap)
 			remain -= int64(buf.cap)
@@ -531,10 +540,15 @@ func (b *bufferManager) recycleBuffer(slice *bufferSlice) {
 		internalLogger.debugf("recycleBuffer called with nil slice")
 		return
 	}
+	if slice.recycled {
+		internalLogger.errorf("recycleBuffer: tentativa de reciclagem dupla offsetInShm=%d cap=%d", slice.offsetInShm, slice.cap)
+		return
+	}
+	slice.recycled = true
 	if slice.isFromShm {
 		for i := range b.lists {
 			if slice.cap == *b.lists[i].capPerBuffer {
-				internalLogger.debugf("Recycling buffer with cap=%d, offsetInShm=%d to list %d", slice.cap, slice.offsetInShm, i)
+				internalLogger.debugf("recycleBuffer: reciclando buffer offsetInShm=%d cap=%d poolIdx=%d poolCap=%d", slice.offsetInShm, slice.cap, i, *b.lists[i].capPerBuffer)
 				b.lists[i].push(slice)
 				break
 			}
@@ -546,25 +560,27 @@ func (b *bufferManager) recycleBuffer(slice *bufferSlice) {
 }
 
 // recycleBuffers recycles a chain of bufferSlices back to the appropriate bufferList.
-//
 // Only call this when the bufferSlices are no longer in use. Not safe for concurrent use unless externally synchronized.
 func (b *bufferManager) recycleBuffers(slice *bufferSlice) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
 	if slice == nil {
 		internalLogger.debugf("recycleBuffers called with nil slice")
 		return
 	}
 	if slice.isFromShm {
 		var err error
+		recycled := 0
 		for {
 			internalLogger.debugf("Recycling buffer chain: offsetInShm=%d", slice.offsetInShm)
 			if !slice.hasNext() {
 				b.recycleBuffer(slice)
+				recycled++
+				internalLogger.debugf("Recycled final slice offsetInShm=%d, total=%d", slice.offsetInShm, recycled)
 				return
 			}
 			nextSliceOffset := slice.nextBufferOffset()
 			b.recycleBuffer(slice)
+			recycled++
+			internalLogger.debugf("Recycled slice offsetInShm=%d, total=%d", slice.offsetInShm, recycled)
 			slice, err = b.readBufferSlice(nextSliceOffset)
 			if err != nil {
 				internalLogger.error("bufferManager recycleBuffers readBufferSlice failed,err=" + err.Error())

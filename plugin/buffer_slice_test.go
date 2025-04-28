@@ -30,6 +30,7 @@ type BufferSliceSuite struct {
 }
 
 func (s *BufferSliceSuite) TestBufferSlice_ReadWrite() {
+	s.T().Logf("[START] TestBufferSlice_ReadWrite")
 	size := 8192
 	slice := newBufferSlice(nil, make([]byte, size), 0, false)
 
@@ -48,9 +49,11 @@ func (s *BufferSliceSuite) TestBufferSlice_ReadWrite() {
 	for i := 0; i < size; i++ {
 		s.Equal(byte(i), data[i])
 	}
+	s.T().Logf("[END] TestBufferSlice_ReadWrite")
 }
 
 func (s *BufferSliceSuite) TestBufferSlice_Skip() {
+	s.T().Logf("[START] TestBufferSlice_Skip")
 	slice := newBufferSlice(nil, make([]byte, 8192), 0, false)
 	slice.append(make([]byte, slice.cap)...)
 	remain := int(slice.cap)
@@ -65,9 +68,11 @@ func (s *BufferSliceSuite) TestBufferSlice_Skip() {
 
 	_ = slice.skip(10000)
 	s.Equal(0, slice.size())
+	s.T().Logf("[END] TestBufferSlice_Skip")
 }
 
 func (s *BufferSliceSuite) TestBufferSlice_Reserve() {
+	s.T().Logf("[START] TestBufferSlice_Reserve")
 	size := 8192
 	slice := newBufferSlice(nil, make([]byte, size), 0, false)
 	data1, err := slice.reserve(100)
@@ -100,9 +105,11 @@ func (s *BufferSliceSuite) TestBufferSlice_Reserve() {
 	for i := 0; i < len(data2); i++ {
 		s.Equal(data2[i], readData[i])
 	}
+	s.T().Logf("[END] TestBufferSlice_Reserve")
 }
 
 func (s *BufferSliceSuite) TestBufferSlice_Update() {
+	s.T().Logf("[START] TestBufferSlice_Update")
 	size := 8192
 	header := make([]byte, bufferHeaderSize)
 	*(*uint32)(unsafe.Pointer(&header[bufferCapOffset])) = uint32(size)
@@ -112,9 +119,11 @@ func (s *BufferSliceSuite) TestBufferSlice_Update() {
 	s.Equal(size, n)
 	slice.update()
 	s.Equal(size, int(*(*uint32)(unsafe.Pointer(&slice.bufferHeader[bufferSizeOffset]))))
+	s.T().Logf("[END] TestBufferSlice_Update")
 }
 
 func (s *BufferSliceSuite) TestBufferSlice_linkedNext() {
+	s.T().Logf("[START] TestBufferSlice_linkedNext")
 	size := 8192
 	sliceNum := 100
 
@@ -133,6 +142,7 @@ func (s *BufferSliceSuite) TestBufferSlice_linkedNext() {
 		data := make([]byte, size)
 		_, _ = rand.Read(data)
 		writeDataArray = append(writeDataArray, data)
+		s.Equal(uint32(size), slice.cap)
 		s.Equal(size, slice.append(data...))
 		slice.update()
 		slices = append(slices, slice)
@@ -146,7 +156,7 @@ func (s *BufferSliceSuite) TestBufferSlice_linkedNext() {
 	for i := 0; i < sliceNum; i++ {
 		slice, err := bm.readBufferSlice(next)
 		s.Equal(nil, err)
-		s.Equal(size, slice.cap)
+		s.Equal(uint32(size), slice.cap)
 		s.Equal(size, slice.size())
 		readData, err := slice.read(size)
 		s.Equal(nil, err, "i:%d offset:%d", i, next)
@@ -155,6 +165,7 @@ func (s *BufferSliceSuite) TestBufferSlice_linkedNext() {
 		s.Equal(!isLastSlice, slice.hasNext())
 		next = slice.nextBufferOffset()
 	}
+	s.T().Logf("[END] TestBufferSlice_linkedNext")
 }
 
 func (s *BufferSliceSuite) TestSliceList_PushPop() {

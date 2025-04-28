@@ -49,6 +49,8 @@ type bufferSlice struct {
 	writeIndex  int
 	isFromShm   bool
 	nextSlice   *bufferSlice
+	// Proteção contra reciclagem dupla
+	recycled bool
 }
 
 func (s *bufferSlice) next() *bufferSlice {
@@ -82,6 +84,7 @@ func putBackBufferSlice(s *bufferSlice) {
 	s.readIndex = 0
 	s.start = 0
 	s.nextSlice = nil
+	s.recycled = false
 	bufferSlicePool.Put(s)
 }
 
@@ -234,16 +237,17 @@ func (l *sliceList) pushBack(s *bufferSlice) {
 func (l *sliceList) popFront() *bufferSlice {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	r := l.frontSlice
-	if l.len > 0 {
-		l.len--
-		l.frontSlice = l.frontSlice.nextSlice
+	if l.frontSlice == nil {
+		return nil
 	}
-	if l.len == 0 {
-		l.frontSlice = nil
+	s := l.frontSlice
+	l.frontSlice = s.nextSlice
+	if l.frontSlice == nil {
 		l.backSlice = nil
 	}
-	return r
+	l.len--
+	internalLogger.debugf("sliceList.popFront: offsetInShm=%d", s.offsetInShm)
+	return s
 }
 
 func (l *sliceList) splitFromWrite() *bufferSlice {
