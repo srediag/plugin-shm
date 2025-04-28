@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -112,7 +112,7 @@ func newSession(config *Config, conn net.Conn, isClient bool) (*Session, error) 
 	}
 
 	if err := VerifyConfig(config); err != nil {
-		return nil, fmt.Errorf("VerifyConfig failed:" + err.Error())
+		return nil, fmt.Errorf("VerifyConfig failed: %v", err)
 	}
 
 	if config.MemMapType == MemMapTypeMemFd {
@@ -123,10 +123,15 @@ func newSession(config *Config, conn net.Conn, isClient bool) (*Session, error) 
 
 	fd, err := getConnDupFd(conn)
 	if err != nil {
-		return nil, fmt.Errorf("could get fd from conn,reason=" + err.Error())
+		return nil, fmt.Errorf("could get fd from conn,reason=%v", err)
 	}
 	// had dup fd, we manage the dup fd in internal's event loop
-	defer conn.Close()
+	defer func() {
+		err := conn.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "session conn.Close error: %v\n", err)
+		}
+	}()
 
 	ensureDefaultDispatcherInit()
 	s := &Session{
@@ -315,7 +320,10 @@ func (s *Session) Close() error {
 		s.shutdownLock.Lock()
 		defer s.shutdownLock.Unlock()
 		//firstly close eventConn
-		s.eventConn.close()
+		err := s.eventConn.close()
+		if err != nil {
+			s.logger.warnf("eventConn close error: %v", err)
+		}
 
 		s.streamLock.Lock()
 		streams := s.streams
@@ -323,7 +331,10 @@ func (s *Session) Close() error {
 		s.streamLock.Unlock()
 
 		for _, stream := range streams {
-			stream.Close()
+			err := stream.Close()
+			if err != nil {
+				s.logger.warnf("stream close error: %v", err)
+			}
 			stream.asyncGoroutineWg.Wait()
 		}
 
@@ -377,14 +388,9 @@ func (s *Session) exitErr(err error) {
 		s.shutdownErr = err
 	}
 	s.shutdownLock.Unlock()
-	s.Close()
-}
-
-// waitForSendErr waits to send a header, checking for a potential shutdown
-func (s *Session) waitForSend(hdr header, body []byte) error {
-	protocolTrace(hdr, nil, true)
-	errCh := make(chan error, 1)
-	return s.waitForSendErr(hdr, body, errCh)
+	if err := s.Close(); err != nil {
+		s.logger.errorf("%s error closing session during exitErr: %v", s.sessionName(), err)
+	}
 }
 
 // waitForSendErr waits to send a header with optional data, checking for a
@@ -475,7 +481,10 @@ func (s *Session) monitorLoop() {
 	}
 	defer func() {
 		tick.Stop()
-		s.monitor.Flush()
+		err := s.monitor.Flush()
+		if err != nil {
+			s.logger.warnf("monitor flush error: %v", err)
+		}
 	}()
 	for {
 		select {
@@ -651,11 +660,15 @@ func (s *Session) initMemManager() error {
 	if mmapMapType == MemMapTypeDevShmFile {
 		if bm, err = getGlobalBufferManager(s.config.ShareMemoryPathPrefix+bufferPathSuffix,
 			s.config.ShareMemoryBufferCap, true, s.config.BufferSliceSizes); err != nil {
-			os.Remove(s.config.ShareMemoryPathPrefix + bufferPathSuffix)
+			if err := os.Remove(s.config.ShareMemoryPathPrefix + bufferPathSuffix); err != nil {
+				s.logger.warnf("os.Remove bufferPath error: %v", err)
+			}
 			return fmt.Errorf("create share memory buffer manager failed ,error=%w", err)
 		}
 		if qm, err = createQueueManager(s.config.QueuePath, s.config.QueueCap); err != nil {
-			os.Remove(s.config.QueuePath)
+			if err := os.Remove(s.config.QueuePath); err != nil {
+				s.logger.warnf("os.Remove queuePath error: %v", err)
+			}
 			return fmt.Errorf("create share memory queue manager failed ,error=%w", err)
 		}
 	} else {

@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,14 +18,16 @@
 package plugin
 
 import (
+	crand "crypto/rand"
 	"fmt"
-	"math/rand"
+	mathrand "math/rand"
 	"net"
 	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
 var (
@@ -71,24 +73,26 @@ func fillTestingData() {
 	writevData = make([][]byte, msgN)
 	expectData = make([]byte, 0, 1024*1024*msgN)
 	for i := 0; i < msgN; i++ {
-		writevData[i] = make([]byte, rand.Intn(1*1024*1024))
-		rand.Read(writevData[i])
+		writevData[i] = make([]byte, mathrand.Intn(1*1024*1024))
+		_, _ = crand.Read(writevData[i])
 		expectData = append(expectData, writevData[i]...)
 		//fmt.Println("slice i ", i, len(writevData[i]))
 	}
 }
 
-func Test_EventDispatcher(t *testing.T) {
+type EventDispatcherTestSuite struct {
+	suite.Suite
+}
+
+func (s *EventDispatcherTestSuite) TestEventDispatcher() {
 	ensureDefaultDispatcherInit()
 	fillTestingData()
 	d := defaultDispatcher
 	var clientConn, serverConn eventConn
+	done := make(chan struct{})
 	go func() {
 		ln, err := net.Listen("tcp", ":7777")
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
+		s.Require().Nil(err)
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
@@ -96,18 +100,17 @@ func Test_EventDispatcher(t *testing.T) {
 				return
 			}
 			fd, err := getConnDupFd(conn)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
-			conn.Close()
+			s.Require().Nil(err)
+			defer func() {
+				if err := conn.Close(); err != nil {
+					s.T().Fatalf("conn.Close failed: %v", err)
+				}
+			}()
 			serverConn = d.newConnection(fd)
-			if err := serverConn.setCallback(&serverConnCallback{
-				t:          t,
+			s.Require().Nil(serverConn.setCallback(&serverConnCallback{
+				t:          s.T(),
 				readBuffer: make([]byte, 0, len(expectData)),
-			}); err != nil {
-				panic(err)
-			}
+			}))
 			runtime.KeepAlive(fd)
 		}
 	}()
@@ -116,38 +119,28 @@ func Test_EventDispatcher(t *testing.T) {
 
 	go func() {
 		conn, err := net.Dial("tcp", ":7777")
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
+		s.Require().Nil(err)
 		fd, err := getConnDupFd(conn)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		conn.Close()
+		s.Require().Nil(err)
+		defer func() {
+			if err := conn.Close(); err != nil {
+				s.T().Fatalf("conn.Close failed: %v", err)
+			}
+		}()
 		clientConn = d.newConnection(fd)
-		if err := clientConn.setCallback(&clientConnCallback{t}); err != nil {
-			fmt.Println(err)
-			return
-		}
-
+		s.Require().Nil(clientConn.setCallback(&clientConnCallback{s.T()}))
 		err = clientConn.write(writevData[0])
-		if err != nil {
-			fmt.Println("write error", err)
-			return
-		}
-
+		s.Require().Nil(err)
 		err = clientConn.writev(writevData[1:]...)
-		if err != nil {
-			fmt.Println("writev error", err)
-			return
-		}
+		s.Require().Nil(err)
 		runtime.KeepAlive(fd)
 	}()
 
 	<-done
-	clientConn.close()
-	serverConn.close()
+	clientConn.close() //nolint:errcheck // test cleanup, error ignored intentionally
+	serverConn.close() //nolint:errcheck // test cleanup, error ignored intentionally
+}
+
+func TestEventDispatcherTestSuite(t *testing.T) {
+	suite.Run(t, new(EventDispatcherTestSuite))
 }

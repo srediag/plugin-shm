@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,15 +22,18 @@ import (
 	_ "net/http/pprof"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
-func TestProtocolCompatibilityForNetUnixConn(t *testing.T) {
-	//testProtocolCompatibility(t, MemMapTypeDevShmFile)
-	testProtocolCompatibility(t, MemMapTypeMemFd)
+type ProtocolManagerTestSuite struct {
+	suite.Suite
 }
 
-func testProtocolCompatibility(t *testing.T, memType MemMapType) {
+func (s *ProtocolManagerTestSuite) TestProtocolCompatibilityForNetUnixConn() {
+	s.testProtocolCompatibility(MemMapTypeMemFd)
+}
+
+func (s *ProtocolManagerTestSuite) testProtocolCompatibility(memType MemMapType) {
 	fmt.Println("----------bengin test protocolAdaptor MemMapType ----------", memType)
 	clientConn, serverConn := testUdsConn()
 	conf := testConf()
@@ -38,17 +41,27 @@ func testProtocolCompatibility(t *testing.T, memType MemMapType) {
 	go func() {
 		sconf := testConf()
 		server, err := Server(serverConn, sconf)
-		assert.Equal(t, true, err == nil, err)
+		s.Require().True(err == nil, err)
 		if err == nil {
-			server.Close()
+			cerr := server.Close()
+			if cerr != nil {
+				s.T().Errorf("server.Close error: %v", cerr)
+			}
 		}
 	}()
 
 	client, err := newSession(conf, clientConn, true)
-	assert.Equal(t, true, err == nil, err)
+	s.Require().True(err == nil, err)
 	if err == nil {
-		client.Close()
+		cerr := client.Close()
+		if cerr != nil {
+			s.T().Errorf("client.Close error: %v", cerr)
+		}
 	}
 
 	fmt.Println("----------end test protocolAdaptor client V2 to server V2 ----------")
+}
+
+func TestProtocolManagerTestSuite(t *testing.T) {
+	suite.Run(t, new(ProtocolManagerTestSuite))
 }

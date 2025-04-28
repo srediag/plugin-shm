@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -65,7 +65,10 @@ func (s streamCbImpl) OnData(reader BufferReader) {
 	if ret == firstMsg {
 		fmt.Println("old server recv msg")
 		_ = s.stream.BufferWriter().WriteString(ret)
-		s.stream.Flush(false)
+		err := s.stream.Flush(false)
+		if err != nil {
+			fmt.Println("Flush error: ", err)
+		}
 		s.stream.ReleaseReadAndReuse()
 
 		firstMsgDone <- struct{}{}
@@ -74,7 +77,10 @@ func (s streamCbImpl) OnData(reader BufferReader) {
 	if ret == secondMsg {
 		fmt.Println("new server recv msg")
 		_ = s.stream.BufferWriter().WriteString(ret)
-		s.stream.Flush(false)
+		err := s.stream.Flush(false)
+		if err != nil {
+			fmt.Println("Flush error: ", err)
+		}
 		s.stream.ReleaseReadAndReuse()
 
 		secondMsgDone <- struct{}{}

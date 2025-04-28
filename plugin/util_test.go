@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,6 +25,7 @@ import (
 
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
 // maxInt is needed for tests in this file only
@@ -35,12 +36,16 @@ func maxInt(a, b int) int {
 	return a
 }
 
-func TestAsyncSendErr(t *testing.T) {
+type UtilTestSuite struct {
+	suite.Suite
+}
+
+func (s *UtilTestSuite) TestAsyncSendErr() {
 	ch := make(chan error)
 	asyncSendErr(ch, ErrTimeout)
 	select {
 	case <-ch:
-		t.Fatalf("should not get")
+		s.T().Fatalf("should not get")
 	default:
 	}
 
@@ -49,16 +54,16 @@ func TestAsyncSendErr(t *testing.T) {
 	select {
 	case <-ch:
 	default:
-		t.Fatalf("should get")
+		s.T().Fatalf("should get")
 	}
 }
 
-func TestAsyncNotify(t *testing.T) {
+func (s *UtilTestSuite) TestAsyncNotify() {
 	ch := make(chan struct{})
 	asyncNotify(ch)
 	select {
 	case <-ch:
-		t.Fatalf("should not get")
+		s.T().Fatalf("should not get")
 	default:
 	}
 
@@ -67,35 +72,27 @@ func TestAsyncNotify(t *testing.T) {
 	select {
 	case <-ch:
 	default:
-		t.Fatalf("should get")
+		s.T().Fatalf("should get")
 	}
 }
 
-func TestMin(t *testing.T) {
-	if min(1, 2) != 1 {
-		t.Fatalf("bad")
-	}
-	if min(2, 1) != 1 {
-		t.Fatalf("bad")
-	}
+func (s *UtilTestSuite) TestMin() {
+	s.Require().Equal(1, min(1, 2))
+	s.Require().Equal(1, min(2, 1))
 }
 
-func TestMinInt(t *testing.T) {
-	if minInt(1, 2) != 1 {
-		t.Fatalf("bad")
-	}
-	if minInt(2, 1) != 1 {
-		t.Fatalf("bad")
-	}
+func (s *UtilTestSuite) TestMinInt() {
+	s.Require().Equal(1, minInt(1, 2))
+	s.Require().Equal(1, minInt(2, 1))
 }
 
-func TestMaxInt(t *testing.T) {
-	if maxInt(1, 2) != 2 {
-		t.Fatalf("bad")
-	}
-	if maxInt(2, 1) != 2 {
-		t.Fatalf("bad")
-	}
+func (s *UtilTestSuite) TestMaxInt() {
+	s.Require().Equal(2, maxInt(1, 2))
+	s.Require().Equal(2, maxInt(2, 1))
+}
+
+func TestUtilTestSuite(t *testing.T) {
+	suite.Run(t, new(UtilTestSuite))
 }
 
 func TestPathExists(t *testing.T) {
@@ -104,9 +101,9 @@ func TestPathExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	_ = f.Close()
 	assert.Equal(t, true, pathExists(path))
-	os.Remove(path)
+	_ = os.Remove(path)
 }
 
 func TestCanCreateOnDevShm(t *testing.T) {
@@ -132,7 +129,7 @@ func TestSafeRemoveUdsFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	assert.Equal(t, true, safeRemoveUdsFile(path))
 	assert.Equal(t, false, safeRemoveUdsFile("not_existing_file"))

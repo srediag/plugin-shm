@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -60,6 +60,7 @@ var (
 // todo mmap interface ?
 // bufferManager's layout in share memory: listSize 2 byte | bufferList  n byte
 type bufferManager struct {
+	mu sync.Mutex
 	//ascending ordered by list.capPerBuffer
 	lists        []*bufferList
 	mem          []byte
@@ -76,9 +77,13 @@ type globalBufferManager struct {
 	bms map[string]*bufferManager
 }
 
+// bufferList manages a list of buffer slices for shared memory allocation.
+//
+// WARNING: bufferList is NOT safe for concurrent use by multiple goroutines unless all access is externally synchronized.
 // bufferList's layout in share memory: size 4 byte | cap 4 byte | head 4 byte | tail 4 byte | capPerBuffer 4 byte | bufferRegion n bye
 // thead safe, lock free. support push && pop concurrently even cross different process.
 type bufferList struct {
+	mu sync.Mutex // Protege operações concorrentes
 	// the number of free buffer
 	size *int32
 	//the max size of list
@@ -222,7 +227,11 @@ func getGlobalBufferManager(shmPath string, capacity uint32, create bool, pairs 
 		}
 		capacity = uint32(fi.Size())
 	}
-	defer shmFile.Close()
+	defer func() {
+		if err := shmFile.Close(); err != nil {
+			internalLogger.warnf("shmFile.Close error: %v", err)
+		}
+	}()
 
 	mem, err := syscall.Mmap(int(shmFile.Fd()), 0, int(capacity), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
@@ -416,13 +425,15 @@ func mappingFreeBufferList(mem []byte, offset uint32) (*bufferList, error) {
 }
 
 func (b *bufferList) pop() (*bufferSlice, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	oldHead := atomic.LoadUint32(b.head)
 	remain := atomic.AddInt32(b.size, -1)
-	if remain <= 0 {
+	if remain < 0 {
 		atomic.AddInt32(b.size, 1)
 		return nil, ErrNoMoreBuffer
 	}
-	//when data races occurred, max retry 200 times.
+	// Allow popping the last buffer; removed restriction that prevented allocating the last slice.
 	for i := 0; i < 200; i++ {
 		bh := bufferHeader(b.bufferRegion[oldHead : oldHead+bufferHeaderSize])
 		if bh.hasNext() {
@@ -436,10 +447,15 @@ func (b *bufferList) pop() (*bufferSlice, error) {
 					oldHead+b.bufferRegionOffsetInShm, true), nil
 			}
 		} else {
-			//don't alloc the last slice.
-			if *b.size <= 1 {
-				atomic.AddInt32(b.size, 1)
-				return nil, ErrNoMoreBuffer
+			// No longer restrict popping the last buffer.
+			if atomic.CompareAndSwapUint32(b.head, oldHead, oldHead) {
+				h := bufferHeader(b.bufferRegion[oldHead : oldHead+bufferHeaderSize])
+				h.clearFlag()
+				h.setInUsed()
+				atomic.AddInt32(b.counter, 1)
+				return newBufferSlice(h,
+					b.bufferRegion[oldHead+bufferHeaderSize:oldHead+bufferHeaderSize+*b.capPerBuffer],
+					oldHead+b.bufferRegionOffsetInShm, true), nil
 			}
 		}
 		oldHead = atomic.LoadUint32(b.head)
@@ -449,12 +465,19 @@ func (b *bufferList) pop() (*bufferSlice, error) {
 }
 
 func (b *bufferList) push(buffer *bufferSlice) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	buffer.reset()
 	for {
 		oldTail := atomic.LoadUint32(b.tail)
 		newTail := buffer.offsetInShm - b.bufferRegionOffsetInShm
 		if atomic.CompareAndSwapUint32(b.tail, oldTail, newTail) {
-			bufferHeader(b.bufferRegion[oldTail : oldTail+bufferHeaderSize]).linkNext(newTail)
+			// Only link if oldTail != newTail (i.e., list was not empty)
+			if oldTail != newTail {
+				bufferHeader(b.bufferRegion[oldTail : oldTail+bufferHeaderSize]).linkNext(newTail)
+			}
+			// Always clear the hasNext flag on the new tail to prevent circular linkage.
+			bufferHeader(b.bufferRegion[newTail : newTail+bufferHeaderSize]).clearFlag()
 			atomic.AddInt32(b.size, 1)
 			atomic.AddInt32(b.counter, -1)
 			return
@@ -464,6 +487,8 @@ func (b *bufferList) push(buffer *bufferSlice) {
 
 // alloc single buffer slice , whose performance better than allocShmBuffers.
 func (b *bufferManager) allocShmBuffer(size uint32) (*bufferSlice, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if size <= b.maxSliceSize {
 		for i := range b.lists {
 			if size <= *b.lists[i].capPerBuffer {
@@ -479,12 +504,13 @@ func (b *bufferManager) allocShmBuffer(size uint32) (*bufferSlice, error) {
 }
 
 func (b *bufferManager) allocShmBuffers(slices *sliceList, size uint32) (allocSize int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	remain := int64(size)
 	for i := len(b.lists) - 1; i >= 0 && remain > 0; i-- {
 		for remain > 0 {
 			buf, err := b.lists[i].pop()
 			if err != nil {
-
 				break
 			}
 			slices.pushBack(buf)
@@ -495,29 +521,44 @@ func (b *bufferManager) allocShmBuffers(slices *sliceList, size uint32) (allocSi
 	return allocSize
 }
 
+// recycleBuffer recycles a single bufferSlice back to the appropriate bufferList.
+//
+// Only call this when the bufferSlice is no longer in use. Not safe for concurrent use unless externally synchronized.
 func (b *bufferManager) recycleBuffer(slice *bufferSlice) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if slice == nil {
+		internalLogger.debugf("recycleBuffer called with nil slice")
 		return
 	}
 	if slice.isFromShm {
 		for i := range b.lists {
 			if slice.cap == *b.lists[i].capPerBuffer {
+				internalLogger.debugf("Recycling buffer with cap=%d, offsetInShm=%d to list %d", slice.cap, slice.offsetInShm, i)
 				b.lists[i].push(slice)
-
 				break
 			}
 		}
+	} else {
+		internalLogger.debugf("recycleBuffer: slice is not from shm, offsetInShm=%d", slice.offsetInShm)
 	}
 	putBackBufferSlice(slice)
 }
 
+// recycleBuffers recycles a chain of bufferSlices back to the appropriate bufferList.
+//
+// Only call this when the bufferSlices are no longer in use. Not safe for concurrent use unless externally synchronized.
 func (b *bufferManager) recycleBuffers(slice *bufferSlice) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if slice == nil {
+		internalLogger.debugf("recycleBuffers called with nil slice")
 		return
 	}
 	if slice.isFromShm {
 		var err error
 		for {
+			internalLogger.debugf("Recycling buffer chain: offsetInShm=%d", slice.offsetInShm)
 			if !slice.hasNext() {
 				b.recycleBuffer(slice)
 				return
@@ -534,6 +575,8 @@ func (b *bufferManager) recycleBuffers(slice *bufferSlice) {
 }
 
 func (b *bufferManager) sliceSize() (size int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	for i := range b.lists {
 		size += int(*b.lists[i].size)
 	}
@@ -541,6 +584,8 @@ func (b *bufferManager) sliceSize() (size int) {
 }
 
 func (b *bufferManager) readBufferSlice(offset uint32) (*bufferSlice, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if int(offset)+bufferHeaderSize >= len(b.mem) {
 		return nil, fmt.Errorf("broken share memory. readBufferSlice unexpected offset:%d buffers cap:%d",
 			offset, len(b.mem))
@@ -559,7 +604,6 @@ func (b *bufferManager) unmap() {
 	for i := 0; i < 50; i++ {
 		if b.checkBufferReturned() {
 			internalLogger.info("all buffer returned before unmap")
-
 			break
 		}
 		time.Sleep(time.Microsecond * 100)

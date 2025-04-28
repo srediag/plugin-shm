@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -122,9 +122,13 @@ func (l *Listener) Close() error {
 	} else {
 		l.callback.OnShutdown("close by Listener.Close()")
 	}
-	l.ln.Close()
+	if err := l.ln.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "Listener.ln.Close error: %v\n", err)
+	}
 	if l.config.Network == "unix" && l.unlinkOnClose {
-		os.Remove(l.config.ListenPath)
+		if err := os.Remove(l.config.ListenPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Listener os.Remove error: %v\n", err)
+		}
 	}
 	l.sessions.closeAll()
 	return nil
@@ -145,7 +149,7 @@ func (l *Listener) Run() error {
 	for {
 		conn, err := l.ln.Accept()
 		if err != nil {
-			if nerr, ok := err.(net.Error); ok && nerr.Temporary() {
+			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 				continue
 			}
 			if strings.Contains(err.Error(), "too many open file") {
@@ -154,7 +158,9 @@ func (l *Listener) Run() error {
 			}
 			l.shutdownErrStr = "accept failed,reason:" + err.Error()
 			l.logger.errorf("run accept error %s", l.shutdownErrStr)
-			l.Close()
+			if err := l.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Listener.Close error: %v\n", err)
+			}
 			break
 		}
 
@@ -162,7 +168,9 @@ func (l *Listener) Run() error {
 		configCopy.listenCallback = &sessionCallback{l}
 		session, err := newSession(&configCopy, conn, false)
 		if err != nil {
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Listener conn.Close error: %v\n", err)
+			}
 			l.logger.warnf("new server session failed, reason" + err.Error())
 			continue
 		}
@@ -309,7 +317,9 @@ func (s *sessions) add(session *Session) {
 		s.data[session] = struct{}{}
 	} else {
 		session.logger.warnf("listener is closed, session %s will not be add", session.name)
-		session.Close()
+		if err := session.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "sessions session.Close error: %v\n", err)
+		}
 	}
 	s.sessionMu.Unlock()
 }
@@ -330,7 +340,9 @@ func (s *sessions) closeAll() {
 	s.data = nil
 	s.sessionMu.Unlock()
 	for session := range toCloseSessions {
-		session.Close()
+		if err := session.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "sessions session.Close error: %v\n", err)
+		}
 	}
 }
 

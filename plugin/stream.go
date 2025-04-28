@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -268,7 +268,8 @@ func (s *Stream) writeFallback(streamStatus uint32, err error) error {
 	s.sendBuf.recycle()
 	s.session.openCircuitBreaker()
 	atomic.AddUint64(&s.session.stats.fallbackWriteCount, 1)
-	return s.session.waitForSend(nil, data)
+	errCh := make(chan error, 1)
+	return s.session.waitForSendErr(nil, data, errCh)
 }
 
 // Close used to close the stream, which maybe block if there is StreamCallbacks running.
@@ -319,7 +320,8 @@ func (s *Stream) close() error {
 				var streamCloseEvent [headerSize + 4]byte
 				header(streamCloseEvent[:]).encode(headerSize+4, s.session.communicationVersion, typeStreamClose)
 				binary.BigEndian.PutUint32(streamCloseEvent[headerSize:], s.id)
-				return s.session.waitForSend(nil, streamCloseEvent[:])
+				errCh := make(chan error, 1)
+				return s.session.waitForSendErr(nil, streamCloseEvent[:], errCh)
 			}
 			return s.session.wakeUpPeer()
 		}
@@ -412,11 +414,11 @@ func (s *Stream) fillDataToReadBuffer(buf bufferSliceWrapper) error {
 					atomic.StoreUint32(&s.callbackInProcess, 0)
 					if atomic.LoadUint32(&s.callbackCloseState) == uint32(callbackWaitExit) {
 						s.asyncGoroutineWg.Done()
-						s.close()
+						_ = s.close() // Ignore error during async callback cleanup
 						return
 					}
 
-					if !(len(s.pendingData.unread) > 0 && atomic.CompareAndSwapUint32(&s.callbackInProcess, 0, 1)) {
+					if len(s.pendingData.unread) <= 0 || !atomic.CompareAndSwapUint32(&s.callbackInProcess, 0, 1) {
 						break
 					}
 				}

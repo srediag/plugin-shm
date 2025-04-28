@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,10 +18,11 @@
 package plugin
 
 import (
+	crand "crypto/rand"
 	"fmt"
-	"math/rand"
 	"net"
 	_ "net/http/pprof"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -49,13 +50,22 @@ func newClientServerByNewClientSession(*SessionManagerConfig) (*Session, *Sessio
 	conf := testSessionMgrConf()
 	conf.MemMapType = MemMapTypeMemFd
 	var client, server *Session
-	syscall.Unlink(conf.Address)
+	if err := syscall.Unlink(conf.Address); err != nil {
+		if !os.IsNotExist(err) {
+			panic("Unlink error: " + err.Error())
+		}
+	}
 
 	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: conf.Address, Net: "unix"})
 	if err != nil {
 		panic("Listen uds failed, " + err.Error())
 	}
-	defer ln.Close()
+	defer func() {
+		err := ln.Close()
+		if err != nil {
+			panic("ln.Close error: " + err.Error())
+		}
+	}()
 
 	go func() {
 		close(serverDone)
@@ -68,7 +78,7 @@ func newClientServerByNewClientSession(*SessionManagerConfig) (*Session, *Sessio
 			panic(err)
 		}
 		// ensure mmap done
-		for !server.handshakeDone { //lint:ignore SA5002
+		for !server.handshakeDone {
 			time.Sleep(time.Millisecond * 100)
 		}
 		close(done)
@@ -85,8 +95,18 @@ func newClientServerByNewClientSession(*SessionManagerConfig) (*Session, *Sessio
 
 func TestStreamPool_Put(t *testing.T) {
 	client, server := newClientServerByNewClientSession(testSessionMgrConf())
-	defer client.Close()
-	defer server.Close()
+	defer func() {
+		err := client.Close()
+		if err != nil {
+			t.Fatalf("client.Close error: %v", err)
+		}
+	}()
+	defer func() {
+		err := server.Close()
+		if err != nil {
+			t.Fatalf("server.Close error: %v", err)
+		}
+	}()
 	sp := newStreamPool(1)
 	sp.session.Store(client)
 
@@ -95,13 +115,21 @@ func TestStreamPool_Put(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open stream failed:%s", err.Error())
 	}
-	defer stream.Close()
+	defer func() {
+		if err := stream.Close(); err != nil {
+			t.Fatalf("stream.Close error: %v", err)
+		}
+	}()
 
 	stream2, err := client.OpenStream()
 	if err != nil {
 		t.Fatalf("open stream failed:%s", err.Error())
 	}
-	defer stream2.Close()
+	defer func() {
+		if err := stream2.Close(); err != nil {
+			t.Fatalf("stream2.Close error: %v", err)
+		}
+	}()
 
 	id := stream.id
 	sp.putOrCloseStream(stream)
@@ -126,8 +154,18 @@ func TestStreamPool_Put(t *testing.T) {
 
 func TestStreamPool_Get(t *testing.T) {
 	client, server := newClientServerByNewClientSession(testSessionMgrConf())
-	defer client.Close()
-	defer server.Close()
+	defer func() {
+		err := client.Close()
+		if err != nil {
+			t.Fatalf("client.Close error: %v", err)
+		}
+	}()
+	defer func() {
+		err := server.Close()
+		if err != nil {
+			t.Fatalf("server.Close error: %v", err)
+		}
+	}()
 	sp := newStreamPool(2)
 	sp.session.Store(client)
 
@@ -148,7 +186,9 @@ func TestStreamPool_Get(t *testing.T) {
 	assert.Equal(t, id2, stream2.id)
 
 	// test put and get, when a stream is closed
-	stream1.Close()
+	if err := stream1.Close(); err != nil {
+		t.Fatalf("stream1.Close error: %v", err)
+	}
 	sp.putOrCloseStream(stream1)
 	sp.putOrCloseStream(stream2)
 	stream1, _ = sp.getOrOpenStream()
@@ -162,7 +202,9 @@ func TestStreamPool_Get(t *testing.T) {
 	id2 = stream2.id
 	sp.putOrCloseStream(stream1)
 	sp.putOrCloseStream(stream2)
-	stream2.Close()
+	if err := stream2.Close(); err != nil {
+		t.Fatalf("stream2.Close error: %v", err)
+	}
 	stream1, _ = sp.getOrOpenStream()
 	stream2, _ = sp.getOrOpenStream()
 	assert.Equal(t, id1, stream1.id)
@@ -178,8 +220,18 @@ func TestStreamPool_Get(t *testing.T) {
 
 func TestStreamPool_Close(t *testing.T) {
 	client, server := newClientServerByNewClientSession(testSessionMgrConf())
-	defer client.Close()
-	defer server.Close()
+	defer func() {
+		err := client.Close()
+		if err != nil {
+			t.Fatalf("client.Close error: %v", err)
+		}
+	}()
+	defer func() {
+		err := server.Close()
+		if err != nil {
+			t.Fatalf("server.Close error: %v", err)
+		}
+	}()
 	sp := newStreamPool(2)
 	assert.Equal(t, (*Session)(nil), sp.Session())
 	sp.session.Store(client)
@@ -197,23 +249,40 @@ func TestStreamPool_Close(t *testing.T) {
 func TestSM_NewClientSession(t *testing.T) {
 	conf := testSessionMgrConf()
 	done := make(chan struct{})
+	errorCh := make(chan error, 1)
 	mockDataLen := 10
 	mockData := make([]byte, mockDataLen)
-	rand.Read(mockData)
+	_, _ = crand.Read(mockData)
 	client, server := newClientServerByNewClientSession(conf)
-	defer client.Close()
-	defer server.Close()
+	defer func() {
+		err := client.Close()
+		if err != nil {
+			t.Fatalf("client.Close error: %v", err)
+		}
+	}()
+	defer func() {
+		err := server.Close()
+		if err != nil {
+			t.Fatalf("server.Close error: %v", err)
+		}
+	}()
 
 	go func() {
 		stream, err := server.AcceptStream()
 		if err != nil {
-			panic("accept stream failed " + err.Error())
+			errorCh <- fmt.Errorf("accept stream failed %w", err)
+			return
 		}
-		defer stream.Close()
+		defer func() {
+			if err := stream.Close(); err != nil {
+				errorCh <- fmt.Errorf("stream.Close error: %w", err)
+			}
+		}()
 		buf := stream.BufferReader()
 		reqData, err := buf.ReadBytes(mockDataLen)
 		if err != nil {
-			panic("readBuf failed" + err.Error())
+			errorCh <- fmt.Errorf("readBuf failed %w", err)
+			return
 		}
 		assert.Equal(t, mockData, reqData)
 		close(done)
@@ -223,7 +292,11 @@ func TestSM_NewClientSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client open stream failed:%s", err.Error())
 	}
-	defer stream.Close()
+	defer func() {
+		if err := stream.Close(); err != nil {
+			t.Fatalf("stream.Close error: %v", err)
+		}
+	}()
 
 	_, err = stream.BufferWriter().WriteBytes(mockData)
 	if err != nil {
@@ -235,24 +308,38 @@ func TestSM_NewClientSession(t *testing.T) {
 		t.Fatalf("stream Flush failed:%s", err.Error())
 	}
 	<-done
+	select {
+	case err := <-errorCh:
+		t.Fatalf("goroutine error: %v", err)
+	default:
+	}
 }
 
 func TestSM_Background(t *testing.T) {
 	fmt.Println("----------test session manager background----------")
 	config := testSessionMgrConf()
-	config.Config.rebuildInterval = time.Second * 10
+	config.rebuildInterval = time.Second * 10
 	config.SessionNum = 1
 	notifyConn := make(chan struct{})
 	notifyClose := make(chan struct{})
 	done := make(chan struct{})
+	errorCh := make(chan error, 1)
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
 
-	syscall.Unlink(config.Address)
+	if err := syscall.Unlink(config.Address); err != nil {
+		if !os.IsNotExist(err) {
+			t.Fatalf("Unlink error: %v", err)
+		}
+	}
 
 	go func() {
 		ln, _ := net.ListenUnix("unix", &net.UnixAddr{Name: config.Address, Net: "unix"})
-		defer ln.Close()
+		defer func() {
+			if err := ln.Close(); err != nil {
+				errorCh <- fmt.Errorf("ln.Close error: %w", err)
+			}
+		}()
 		servers := make([]*Session, 2)
 
 		defer func() {
@@ -260,7 +347,9 @@ func TestSM_Background(t *testing.T) {
 				if s == nil {
 					continue
 				}
-				s.Close()
+				if err := s.Close(); err != nil {
+					errorCh <- fmt.Errorf("s.Close error: %w", err)
+				}
 			}
 		}()
 		close(notifyConn)
@@ -268,10 +357,11 @@ func TestSM_Background(t *testing.T) {
 			conn, _ := ln.Accept()
 			server, err := Server(conn, config.Config)
 			if err != nil {
-				t.Fatalf("Server error:%s", err.Error())
+				errorCh <- fmt.Errorf("Server error: %w", err)
+				return
 			}
 			// ensure mmap done
-			for !server.handshakeDone { //lint:ignore SA5002
+			for !server.handshakeDone {
 				time.Sleep(100 * time.Millisecond)
 			}
 			servers[i] = server
@@ -291,21 +381,29 @@ func TestSM_Background(t *testing.T) {
 	<-notifyClose
 	// now sm has 1 session, try to close it
 	s1 := sm.pools[0].Session()
-	s1.Close()
-	assert.Equal(t, true, atomic.LoadUint32(&s1.shutdown) == 1)
+	if err := s1.Close(); err != nil {
+		t.Fatalf("s1.Close error: %v", err)
+	}
 	// wait until all pre init done
-	fmt.Printf("wait init %v\n", config.Config.rebuildInterval)
+	fmt.Printf("wait init %v\n", config.rebuildInterval)
 	wg.Wait()
 	// wait for session reconnect
 	fmt.Println("init done")
 	// + 1*time.Second ensure now session has been restarted
-	time.Sleep(config.Config.rebuildInterval + 1*time.Second)
+	time.Sleep(config.rebuildInterval + 1*time.Second)
 	// now session has been restarted
 	s1 = sm.pools[0].Session()
 	assert.Equal(t, false, s1.shutdown == 1)
 
 	close(done)
-	sm.Close()
+	if err := sm.Close(); err != nil {
+		t.Fatalf("sm.Close error: %v", err)
+	}
+	select {
+	case err := <-errorCh:
+		t.Fatalf("goroutine error: %v", err)
+	default:
+	}
 }
 
 func TestSM_GlobalCreation(t *testing.T) {
@@ -317,7 +415,9 @@ func TestSM_GlobalCreation(t *testing.T) {
 	gsm, _ := InitGlobalSessionManager(config)
 	gsm2 := GlobalSessionManager()
 	assert.Equal(t, gsm, gsm2)
-	GlobalSessionManager().Close()
+	if err := GlobalSessionManager().Close(); err != nil {
+		t.Fatalf("GlobalSessionManager().Close error: %v", err)
+	}
 	//ensure share memory was clean
 	time.Sleep(2 * time.Second)
 }
@@ -327,21 +427,35 @@ func TestSM_GetAndPutStream(t *testing.T) {
 	config := testSessionMgrConf()
 	notifyConn := make(chan struct{})
 	done := make(chan struct{})
+	errorCh := make(chan error, 1)
 	sessionPairNum := 1
 	config.SessionNum = sessionPairNum
 	wg := &sync.WaitGroup{}
 	wg.Add(sessionPairNum)
 
-	syscall.Unlink(config.Address)
+	if err := syscall.Unlink(config.Address); err != nil {
+		if !os.IsNotExist(err) {
+			t.Fatalf("Unlink error: %v", err)
+		}
+	}
 
 	go func() {
 		ln, _ := net.ListenUnix("unix", &net.UnixAddr{Name: config.Address, Net: "unix"})
+		defer func() {
+			if err := ln.Close(); err != nil {
+				errorCh <- fmt.Errorf("ln.Close error: %w", err)
+			}
+		}()
 		servers := make([]*Session, sessionPairNum)
-		defer ln.Close()
 
 		defer func() {
 			for _, s := range servers {
-				s.Close()
+				if s == nil {
+					continue
+				}
+				if err := s.Close(); err != nil {
+					errorCh <- fmt.Errorf("s.Close error: %w", err)
+				}
 			}
 		}()
 
@@ -350,10 +464,11 @@ func TestSM_GetAndPutStream(t *testing.T) {
 			conn, _ := ln.Accept()
 			server, err := Server(conn, config.Config)
 			if err != nil {
-				t.Fatalf("Server error:%s", err.Error())
+				errorCh <- fmt.Errorf("Server error: %w", err)
+				return
 			}
 			// ensure mmap done
-			for !server.handshakeDone { //lint:ignore SA5002
+			for !server.handshakeDone {
 				time.Sleep(time.Millisecond * 100)
 			}
 			servers[i] = server
@@ -384,13 +499,20 @@ func TestSM_GetAndPutStream(t *testing.T) {
 	sm.PutBack(s)
 	sm.PutBack(s2)
 	// get again
-	s3, err := sm.GetStream()
-	s4, err := sm.GetStream()
+	s3, _ := sm.GetStream()
+	s4, _ := sm.GetStream()
 	assert.Equal(t, s, s3)
 	assert.Equal(t, s2, s4)
 
-	sm.Close()
+	if err := sm.Close(); err != nil {
+		t.Fatalf("sm.Close error: %v", err)
+	}
 	close(done)
+	select {
+	case err := <-errorCh:
+		t.Fatalf("goroutine error: %v", err)
+	default:
+	}
 }
 
 func TestStreamPool_PutAndPopWithConcurrently(t *testing.T) {

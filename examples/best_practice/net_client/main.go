@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,9 +18,9 @@
 package net_client
 
 import (
+	"crypto/rand"
 	"flag"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -55,7 +55,7 @@ func main() {
 	flag.Parse()
 
 	randContent := make([]byte, *packageSize)
-	rand.Read(randContent)
+	_, _ = rand.Read(randContent)
 
 	// 1. dial unix domain socket
 	dir, err := os.Getwd()

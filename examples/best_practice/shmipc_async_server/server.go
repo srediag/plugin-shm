@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -41,7 +41,9 @@ var (
 type listenCbImpl struct{}
 
 func (l *listenCbImpl) OnNewStream(s *plugin.Stream) {
-	s.SetCallbacks(&streamCbImpl{stream: s})
+	if err := s.SetCallbacks(&streamCbImpl{stream: s}); err != nil {
+		fmt.Println("set callbacks error:" + err.Error())
+	}
 }
 
 func (l *listenCbImpl) OnShutdown(reason string) {
@@ -122,5 +124,7 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	ln.Run()
+	if err := ln.Run(); err != nil {
+		fmt.Println("listener run error:" + err.Error())
+	}
 }

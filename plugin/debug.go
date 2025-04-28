@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,9 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"sync/atomic"
 	"time"
-	"unsafe"
 )
 
 type logger struct {
@@ -113,50 +111,70 @@ func (l *logger) errorf(format string, a ...interface{}) {
 	if level > levelError {
 		return
 	}
-	fmt.Fprintf(l.out, l.prefix(levelError)+format+reset+"\n", a...)
+	if _, err := fmt.Fprintf(l.out, l.prefix(levelError)+format+reset+"\n", a...); err != nil {
+		// Optionally log or handle the error
+		fmt.Fprintf(os.Stderr, "logger errorf failed: %v\n", err)
+	}
 }
 
 func (l *logger) error(v interface{}) {
 	if level > levelError {
 		return
 	}
-	fmt.Fprintln(l.out, l.prefix(levelError), v, reset)
+	if _, err := fmt.Fprintln(l.out, l.prefix(levelError), v, reset); err != nil {
+		// Optionally log or handle the error
+		fmt.Fprintf(os.Stderr, "logger error failed: %v\n", err)
+	}
 }
 
 func (l *logger) warnf(format string, a ...interface{}) {
 	if level > levelWarn {
 		return
 	}
-	fmt.Fprintf(l.out, l.prefix(levelWarn)+format+reset+"\n", a...)
+	if _, err := fmt.Fprintf(l.out, l.prefix(levelWarn)+format+reset+"\n", a...); err != nil {
+		// Optionally log or handle the error
+		fmt.Fprintf(os.Stderr, "logger warnf failed: %v\n", err)
+	}
 }
 
 func (l *logger) infof(format string, a ...interface{}) {
 	if level > levelInfo {
 		return
 	}
-	fmt.Fprintf(l.out, l.prefix(levelInfo)+format+reset+"\n", a...)
+	if _, err := fmt.Fprintf(l.out, l.prefix(levelInfo)+format+reset+"\n", a...); err != nil {
+		// Optionally log or handle the error
+		fmt.Fprintf(os.Stderr, "logger infof failed: %v\n", err)
+	}
 }
 
 func (l *logger) info(v interface{}) {
 	if level > levelInfo {
 		return
 	}
-	fmt.Fprintln(l.out, l.prefix(levelInfo), v, reset)
+	if _, err := fmt.Fprintln(l.out, l.prefix(levelInfo), v, reset); err != nil {
+		// Optionally log or handle the error
+		fmt.Fprintf(os.Stderr, "logger info failed: %v\n", err)
+	}
 }
 
 func (l *logger) debugf(format string, a ...interface{}) {
 	if level > levelDebug {
 		return
 	}
-	fmt.Fprintf(l.out, l.prefix(levelDebug)+format+reset+"\n", a...)
+	if _, err := fmt.Fprintf(l.out, l.prefix(levelDebug)+format+reset+"\n", a...); err != nil {
+		// Optionally log or handle the error
+		fmt.Fprintf(os.Stderr, "logger debugf failed: %v\n", err)
+	}
 }
 
 func (l *logger) tracef(format string, a ...interface{}) {
 	if level > levelTrace {
 		return
 	}
-	//todo optimized
-	fmt.Fprintf(l.out, l.prefix(levelTrace)+format+reset+"\n", a...)
+	if _, err := fmt.Fprintf(l.out, l.prefix(levelTrace)+format+reset+"\n", a...); err != nil {
+		// Optionally log or handle the error
+		fmt.Fprintf(os.Stderr, "logger tracef failed: %v\n", err)
+	}
 }
 
 func (l *logger) prefix(level int) string {
@@ -182,83 +200,6 @@ func (l *logger) location() string {
 	}
 	file = filepath.Base(file)
 	return file + ":" + strconv.Itoa(line)
-}
-
-func computeFreeSliceNum(list *bufferList) int {
-	freeSlices := 0
-	offset := atomic.LoadUint32(list.head)
-	for {
-		freeSlices++
-		bh := bufferHeader(list.bufferRegion[offset:])
-		hasNext := bh.hasNext()
-		if !hasNext && offset != atomic.LoadUint32(list.tail) {
-			fmt.Printf("something error, expectedTailOffset:%d but:%d current freeSlices:%d \n",
-				atomic.LoadUint32(list.tail), offset, freeSlices)
-		}
-		if !hasNext {
-			break
-		}
-		offset = bh.nextBufferOffset()
-		if offset >= uint32(len(list.bufferRegion)) {
-			fmt.Printf("something error , next offset is :%d ,greater than bufferRegion length:%d\n",
-				offset, len(list.bufferRegion))
-			break
-		}
-	}
-	return freeSlices
-}
-
-// 1.occurred memory leak, if list's free slice number != expect free slice number.
-// 2.print the metadata and payload of the leaked slice.
-func debugBufferListDetail(path string, bufferMgrHeaderSize int, bufferHeaderSize int) {
-	mem, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	bm, err := mappingBufferManager(path, mem, 0)
-	expectAllSliceNum := uint32(0)
-	for i, list := range bm.lists {
-		fmt.Printf("%d. list capacity:%d size:%d realSize:%d perSliceCap:%d headOffset:%d tailOffset:%d\n",
-			i, *list.cap, *list.size, computeFreeSliceNum(list), *list.capPerBuffer, *list.head, *list.tail)
-		expectAllSliceNum += *list.cap
-	}
-	freeSliceNum := uint32(bm.sliceSize())
-	fmt.Printf("summary:memory leak:%t all free slice num:%d expect num:%d\n",
-		freeSliceNum != expectAllSliceNum, freeSliceNum, expectAllSliceNum)
-
-	if freeSliceNum != expectAllSliceNum {
-		fmt.Println("now check the buffer slice which is in used")
-	}
-	printLeakShareMemory(bm, bufferMgrHeaderSize, bufferHeaderSize)
-}
-func printLeakShareMemory(bm *bufferManager, bufferMgrHeaderSize int, bufferHeaderSize int) {
-	offsetInShm := bufferMgrHeaderSize
-	for i := range bm.lists {
-		offsetInShm += bufferListHeaderSize
-		data := bm.lists[i].bufferRegion
-		offset := 0
-		for offset < len(data) {
-			bh := bufferHeader(data[offset:])
-			size := int(*(*uint32)(unsafe.Pointer(&data[offset+bufferSizeOffset])))
-			flag := int(*(*uint8)(unsafe.Pointer(&data[offset+bufferFlagOffset])))
-			if !bh.hasNext() || bh.isInUsed() {
-				fmt.Printf("offset in shm :%d next:%d len:%d flag:%d inused:%t data:%s\n",
-					offset+offsetInShm, bh.nextBufferOffset(), size, flag, bh.isInUsed(),
-					string(data[offset+bufferHeaderSize:offset+bufferHeaderSize+size]))
-			}
-			offset += int(*bm.lists[i].capPerBuffer) + bufferHeaderSize
-		}
-		offsetInShm += offset
-	}
-}
-
-// DebugBufferListDetail print all BufferList's status in share memory located in the `path`
-// if MemMapType is MemMapTypeMemFd, you could using the command that
-// `lsof -p $PID` to found the share memory which was mmap by memfd,
-// and the command `cat /proc/$PID/$MEMFD > $path` dump the share memory to file system.
-func DebugBufferListDetail(path string) {
-	debugBufferListDetail(path, 8, 20)
 }
 
 // DebugQueueDetail print IO-Queue's status which was mmap in the `path`

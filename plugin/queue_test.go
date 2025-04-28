@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -150,7 +150,10 @@ func BenchmarkQueuePop(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		q.pop()
+		_, err := q.pop()
+		if err != nil {
+			b.Fatalf("pop error: %v", err)
+		}
 	}
 }
 
@@ -180,7 +183,10 @@ func BenchmarkQueueMultiPop(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 
 		for pb.Next() {
-			q.pop()
+			_, err := q.pop()
+			if err != nil {
+				b.Fatalf("pop error: %v", err)
+			}
 		}
 	})
 }

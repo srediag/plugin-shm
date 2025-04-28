@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,9 +19,15 @@ package plugin
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/suite"
 )
 
-func TestLogColor(t *testing.T) {
+type DebugTestSuite struct {
+	suite.Suite
+}
+
+func (s *DebugTestSuite) TestLogColor() {
 	SetLogLevel(levelTrace)
 
 	internalLogger.tracef("this is tracef %s", "hello world")
@@ -38,4 +44,8 @@ func TestLogColor(t *testing.T) {
 
 	internalLogger.errorf("this is errorf %s", "hello world")
 	internalLogger.error("this is error")
+}
+
+func TestDebugTestSuite(t *testing.T) {
+	suite.Run(t, new(DebugTestSuite))
 }

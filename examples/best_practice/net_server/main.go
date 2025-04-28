@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -35,7 +35,11 @@ import (
 var count uint64
 
 func handleConn(conn net.Conn) {
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Println("conn.Close error:", err)
+		}
+	}()
 
 	req := &idl.Request{}
 	resp := &idl.Response{}
@@ -48,7 +52,7 @@ func handleConn(conn net.Conn) {
 			return
 		}
 		req.Deserialize(readBuffer[:n])
-		idl.BufferPool.Put(interface{}(readBuffer))
+		idl.BufferPool.Put(&readBuffer)
 
 		{
 			//2.handle request
@@ -96,7 +100,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer ln.Close()
+	defer func() {
+		if err := ln.Close(); err != nil {
+			fmt.Println("ln.Close error:", err)
+		}
+	}()
 
 	// 2. accept a unix domain socket
 	for {

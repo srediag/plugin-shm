@@ -1,7 +1,7 @@
 //go:build !race
 
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -52,6 +52,7 @@ type connEventHandler struct {
 }
 
 func (c *connEventHandler) handleEvent(events int, d *epollDispatcher) {
+	_ = d // intentionally unused
 	if events&syscall.EPOLLRDHUP != 0 {
 		c.onRemoteClose()
 		return
@@ -235,11 +236,17 @@ func (c *connEventHandler) deferredClose() {
 	if atomic.CompareAndSwapUint32(&c.isClose, 0, 1) {
 		close(c.onWriteReadyCh)
 		c.dispatcher.post(func() {
-			epollCtl(c.dispatcher.epollFd, syscall.EPOLL_CTL_DEL, c.fd, nil)
+			if c.dispatcher.epollFd > 0 && c.fd > 0 {
+				if err := epollCtl(c.dispatcher.epollFd, syscall.EPOLL_CTL_DEL, c.fd, nil); err != nil {
+					fmt.Fprintf(os.Stderr, "epollCtl DEL error: %v\n", err)
+				}
+			}
 			c.dispatcher.lock.Lock()
 			delete(c.dispatcher.conns, c.fd)
 			c.dispatcher.lock.Unlock()
-			c.file.Close()
+			if err := c.file.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "conn file.Close error: %v\n", err)
+			}
 		})
 	}
 }
@@ -338,25 +345,29 @@ func (d *epollDispatcher) runLoop() error {
 			timeout = 0
 			d.lock.Lock()
 			for i := 0; i < n; i++ {
-				var h *connEventHandler = *(**connEventHandler)(unsafe.Pointer(&events[i].data))
+				var h = *(**connEventHandler)(unsafe.Pointer(&events[i].data))
 				h.handleEvent(int(events[i].events), d)
 			}
 			d.lock.Unlock()
 			d.runLambda()
 		}
-		runtime.KeepAlive(d)
+
 	}()
 	return nil
 }
 
 func (d *epollDispatcher) shutdown() error {
-	d.epollFile.Close()
+	if err := d.epollFile.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "epollFile.Close error: %v\n", err)
+	}
 	d.waitLoopExitWg.Wait()
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	d.isShutdown = true
 	for fd := range d.conns {
-		syscall.Close(fd)
+		if err := syscall.Close(fd); err != nil {
+			fmt.Fprintf(os.Stderr, "syscall.Close error: %v\n", err)
+		}
 		delete(d.conns, fd)
 	}
 	return nil

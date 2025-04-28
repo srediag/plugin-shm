@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -30,6 +30,12 @@ var (
 )
 
 // BufferWriter used to write data to stream.
+//
+// NOTE: BufferWriter and BufferReader are NOT safe for concurrent use by multiple goroutines.
+// If you need to use a buffer concurrently, synchronize all access externally.
+//
+// Always call ReleasePreviousRead() when it is safe to drop all previous results of ReadBytes and Peek,
+// otherwise shared memory may leak. See method docs for details.
 type BufferWriter interface {
 	//Len() return the current wrote size of buffer.
 	//It will traverse all underlying slices to compute the unread size, please don't call frequently.
@@ -46,6 +52,11 @@ type BufferWriter interface {
 }
 
 // BufferReader used to read data from stream.
+//
+// WARNING: BufferReader is NOT safe for concurrent use by multiple goroutines.
+// Always synchronize access externally if used concurrently.
+//
+// After calling ReleasePreviousRead(), all previously returned slices from ReadBytes/Peek become invalid.
 type BufferReader interface {
 	io.ByteReader
 
@@ -80,12 +91,7 @@ type BufferReader interface {
 }
 
 type linkedBuffer struct {
-	/* linkBuffer'recycle() will hold this lock.
-	in most scenario(99.999..%), no competition on this mutex.
-	but when Stream.Close() called, at the meantime,
-	Session receive data and and find the Stream is under status of close,
-	which  will call linkBuffer's recycle()
-	*/
+	mu            sync.Mutex
 	recycleMux    sync.Mutex
 	sliceList     *sliceList
 	bufferManager *bufferManager
@@ -128,6 +134,8 @@ func (l *linkedBuffer) copyWriteAndFlush(data []byte) (n int, err error) {
 }
 
 func (l *linkedBuffer) WriteByte(b byte) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.sliceList.writeSlice == nil {
 		l.alloc(1)
 		l.sliceList.writeSlice = l.sliceList.front()
@@ -145,6 +153,8 @@ func (l *linkedBuffer) WriteByte(b byte) error {
 }
 
 func (l *linkedBuffer) WriteBytes(data []byte) (n int, err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if len(data) == 0 {
 		return
 	}
@@ -174,6 +184,8 @@ func (l *linkedBuffer) WriteBytes(data []byte) (n int, err error) {
 // 2. if the next slice can contain the size, then reserve and return it
 // 3. alloc a new slice which can contain the size
 func (l *linkedBuffer) Reserve(size int) ([]byte, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	// 1. use current slice
 	if l.sliceList.writeSlice == nil {
 		l.alloc(uint32(size))
@@ -215,12 +227,17 @@ func (l *linkedBuffer) Reserve(size int) ([]byte, error) {
 }
 
 func (l *linkedBuffer) WriteString(str string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	_, err := l.WriteBytes(string2bytesZeroCopy(str))
 	return err
 }
 
 func (l *linkedBuffer) recycle() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.recycleMux.Lock()
+	defer l.recycleMux.Unlock()
 	for l.sliceList.size() > 0 {
 		slice := l.sliceList.popFront()
 		if slice.isFromShm {
@@ -230,10 +247,11 @@ func (l *linkedBuffer) recycle() {
 		}
 	}
 	l.clean()
-	l.recycleMux.Unlock()
 }
 
 func (l *linkedBuffer) rootBufOffset() uint32 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return l.sliceList.front().offsetInShm
 }
 
@@ -261,6 +279,8 @@ func (l *linkedBuffer) done(endStream bool) BufferReader {
 }
 
 func (l *linkedBuffer) underlyingData() [][]byte {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	data := make([][]byte, 0, 4)
 	for slice := l.sliceList.front(); slice != nil; slice = slice.next() {
 		data = append(data, slice.data[slice.readIndex:slice.writeIndex])
@@ -272,6 +292,8 @@ func (l *linkedBuffer) underlyingData() [][]byte {
 }
 
 func (l *linkedBuffer) read(p []byte) (n int, err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	size := len(p)
 	if size <= 0 {
 		return
@@ -297,6 +319,8 @@ func (l *linkedBuffer) read(p []byte) (n int, err error) {
 }
 
 func (l *linkedBuffer) ReadByte() (byte, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.len < 1 {
 		if err := l.stream.readMore(1); err != nil {
 			return 0, err
@@ -314,6 +338,8 @@ func (l *linkedBuffer) ReadByte() (byte, error) {
 }
 
 func (l *linkedBuffer) ReadBytes(size int) (result []byte, err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if size <= 0 {
 		return
 	}
@@ -348,6 +374,8 @@ func (l *linkedBuffer) ReadBytes(size int) (result []byte, err error) {
 }
 
 func (l *linkedBuffer) ReadString(size int) (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if size <= 0 {
 		return "", nil
 	}
@@ -380,6 +408,8 @@ func (l *linkedBuffer) ReadString(size int) (string, error) {
 
 // Peek isn't influence l.Len()
 func (l *linkedBuffer) Peek(size int) ([]byte, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if size <= 0 {
 		return nil, nil
 	}
@@ -410,6 +440,8 @@ func (l *linkedBuffer) Peek(size int) ([]byte, error) {
 }
 
 func (l *linkedBuffer) Discard(size int) (n int, err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.len < size {
 		if err = l.stream.readMore(size); err != nil {
 			return
@@ -428,7 +460,12 @@ func (l *linkedBuffer) Discard(size int) (n int, err error) {
 	return
 }
 
+// cleanPinnedList recycles all pinned slices. Only called internally.
+//
+// Slices are pinned when returned by ReadBytes/Peek and not yet released.
 func (l *linkedBuffer) cleanPinnedList() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.pinnedList.size() == 0 {
 		return
 	}
@@ -443,7 +480,13 @@ func (l *linkedBuffer) cleanPinnedList() {
 	}
 }
 
+// ReleasePreviousRead releases all pinned slices and recycles them if possible.
+//
+// Call this method ONLY when it is safe to drop all previous results of ReadBytes and Peek.
+// Failing to do so will leak shared memory.
 func (l *linkedBuffer) ReleasePreviousRead() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.cleanPinnedList()
 
 	if l.sliceList.size() == 0 {
@@ -457,6 +500,8 @@ func (l *linkedBuffer) ReleasePreviousRead() {
 }
 
 func (l *linkedBuffer) releasePreviousReadAndReserve() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.cleanPinnedList()
 	//try reserve a buffer slice  in long-stream mode for improving performance.
 	//we could use read buffer as next write buffer, to avoiding share memory allocate and recycle.
@@ -469,7 +514,13 @@ func (l *linkedBuffer) releasePreviousReadAndReserve() {
 	}
 }
 
+// readNextSlice advances to the next buffer slice, recycling or pinning as needed.
+//
+// If the current slice is pinned, it is added to pinnedList for later recycling.
+// Otherwise, it is recycled immediately.
 func (l *linkedBuffer) readNextSlice() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	slice := l.sliceList.popFront()
 	if slice.isFromShm {
 		if l.currentPinned {
@@ -481,7 +532,10 @@ func (l *linkedBuffer) readNextSlice() {
 	l.currentPinned = false
 }
 
+// alloc allocates a new buffer slice, preferring shared memory but falling back to heap if needed.
 func (l *linkedBuffer) alloc(size uint32) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	remain := int64(size)
 	buf, err := l.bufferManager.allocShmBuffer(size)
 	if err == nil {
@@ -505,10 +559,14 @@ func (l *linkedBuffer) alloc(size uint32) {
 }
 
 func (l *linkedBuffer) isFromShareMemory() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return l.isFromShm
 }
 
 func (l *linkedBuffer) appendBufferSlice(slice *bufferSlice) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if slice == nil {
 		return
 	}
@@ -522,6 +580,8 @@ func (l *linkedBuffer) appendBufferSlice(slice *bufferSlice) {
 
 // todo
 func (l *linkedBuffer) clean() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	for l.sliceList.size() > 0 {
 		putBackBufferSlice(l.sliceList.popFront())
 	}
@@ -533,5 +593,7 @@ func (l *linkedBuffer) clean() {
 }
 
 func (l *linkedBuffer) bindStream(s *Stream) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.stream = s
 }

@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,9 +18,9 @@
 package shmipc_async_client
 
 import (
+	"crypto/rand"
 	"fmt"
 	"math"
-	"math/rand"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -134,7 +134,10 @@ func main() {
 	for i := 0; i < concurrency; i++ {
 		go func() {
 			key := make([]byte, 1024)
-			rand.Read(key)
+			if _, err := rand.Read(key); err != nil {
+				fmt.Printf("Failed to generate random key: %v\n", err)
+				return
+			}
 			s := &streamCbImpl{key: key, smgr: smgr, loop: math.MaxUint64}
 			stream, err := smgr.GetStream()
 			if err != nil {
@@ -143,7 +146,10 @@ func main() {
 			}
 			s.stream = stream
 			s.n = 0
-			stream.SetCallbacks(s)
+			if err := stream.SetCallbacks(s); err != nil {
+				fmt.Println("set callbacks error:" + err.Error())
+				return
+			}
 			s.send()
 			// and maybe call `smgr.PutBack()` or `stream.Close()` when you are no longer using the stream.
 		}()

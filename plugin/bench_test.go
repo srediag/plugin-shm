@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -69,7 +69,11 @@ func newBenchmarkClientServer(likelySize uint32) (client, server *Session) {
 		if err != nil {
 			panic("accept conn failed:" + err.Error())
 		}
-		defer ln.Close()
+		defer func() {
+			if err := ln.Close(); err != nil {
+				panic("ln.Close failed: " + err.Error())
+			}
+		}()
 		server, err = Server(conn, config)
 		if err != nil {
 			panic("create shmipc server failed:" + err.Error())
@@ -145,6 +149,7 @@ func BenchmarkParallelPingPongByShmipc4MB(b *testing.B) {
 }
 
 func mustWrite(s *Stream, size int, b *testing.B) {
+	_ = b // intentionally unused
 	s.sendBuf.writeEmpty(size)
 	for {
 		err := s.Flush(false)
@@ -160,6 +165,7 @@ func mustWrite(s *Stream, size int, b *testing.B) {
 }
 
 func mustRead(s *Stream, size int, b *testing.B) bool {
+	_ = b // intentionally unused
 	_, err := s.BufferReader().Discard(size)
 	if err == ErrStreamClosed || err == ErrEndOfStream {
 		return false
@@ -173,8 +179,12 @@ func benchmarkParallelPingPongByShmipc(b *testing.B, reqSize, respSize int) {
 	//SetLogLevel(levelTrace)
 	client, server := newBenchmarkClientServer(uint32(reqSize))
 	defer func() {
-		client.Close()
-		server.Close()
+		if err := client.Close(); err != nil {
+			b.Fatalf("client.Close failed: %v", err)
+		}
+		if err := server.Close(); err != nil {
+			b.Fatalf("server.Close failed: %v", err)
+		}
 	}()
 
 	b.SetBytes(int64(reqSize + respSize))
@@ -192,7 +202,11 @@ func benchmarkParallelPingPongByShmipc(b *testing.B, reqSize, respSize int) {
 					errCh <- fmt.Errorf("accept error:%s", err.Error())
 					return
 				}
-				defer stream.Close()
+				defer func() {
+					if err := stream.Close(); err != nil {
+						errCh <- fmt.Errorf("stream.Close failed: %v", err)
+					}
+				}()
 				for {
 					if !mustRead(stream, reqSize, b) {
 						return
@@ -211,7 +225,7 @@ func benchmarkParallelPingPongByShmipc(b *testing.B, reqSize, respSize int) {
 				stream.ReleaseReadAndReuse()
 			}
 			// make server side stream could receive notification.
-			stream.Close()
+			stream.Close() //nolint:errcheck // test cleanup, error ignored intentionally
 			<-doneCh
 			select {
 			case err := <-errCh:
@@ -295,7 +309,11 @@ func udsMustWrite(conn net.Conn, buf []byte) {
 
 func benchmarkParallelPingPongByUds(b *testing.B, reqSize, respSize int) {
 	addr := &net.UnixAddr{Name: fmt.Sprintf("/dev/shm/uds_%d.sock", time.Now().UnixNano()), Net: "unix"}
-	defer syscall.Unlink(addr.Name)
+	defer func() {
+		if err := syscall.Unlink(addr.Name); err != nil {
+			b.Fatalf("Unlink failed: %v", err)
+		}
+	}()
 
 	serverStartNotifyCh := make(chan struct{})
 
@@ -308,7 +326,11 @@ func benchmarkParallelPingPongByUds(b *testing.B, reqSize, respSize int) {
 		time.AfterFunc(time.Millisecond*10, func() {
 			close(serverStartNotifyCh)
 		})
-		defer ln.Close()
+		defer func() {
+			if err := ln.Close(); err != nil {
+				panic(fmt.Sprintf("ln.Close failed: %v", err))
+			}
+		}()
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
@@ -317,7 +339,11 @@ func benchmarkParallelPingPongByUds(b *testing.B, reqSize, respSize int) {
 			readBuffer := make([]byte, reqSize)
 			writeBuffer := make([]byte, respSize)
 			go func(conn net.Conn) {
-				defer conn.Close()
+				defer func() {
+					if err := conn.Close(); err != nil {
+						panic(fmt.Sprintf("conn.Close failed: %v", err))
+					}
+				}()
 				for {
 					if !udsMustRead(conn, readBuffer, reqSize) {
 						return
@@ -337,7 +363,11 @@ func benchmarkParallelPingPongByUds(b *testing.B, reqSize, respSize int) {
 		if err != nil {
 			panic("create uds connection failed:" + err.Error())
 		}
-		defer clientConn.Close()
+		defer func() {
+			if err := clientConn.Close(); err != nil {
+				panic(fmt.Sprintf("clientConn.Close failed: %v", err))
+			}
+		}()
 		readBuffer := make([]byte, respSize)
 		writeBuffer := make([]byte, reqSize)
 		for pb.Next() {

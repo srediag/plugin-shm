@@ -38,8 +38,8 @@ func TestBlockReadFullAndBlockWriteFull(t *testing.T) {
 		return
 	}
 	defer func() {
-		listener.Close()
-		os.Remove("/tmp/testBlockRWFull.sock")
+		listener.Close()                       //nolint:errcheck // test cleanup, error ignored intentionally
+		os.Remove("/tmp/testBlockRWFull.sock") //nolint:errcheck // test cleanup, error ignored intentionally
 	}()
 
 	// Start a goroutine to accept a connection and write data
@@ -48,7 +48,11 @@ func TestBlockReadFullAndBlockWriteFull(t *testing.T) {
 		if err != nil {
 			t.Errorf("failed to accept connection: %v\n", err)
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Errorf("conn.Close failed: %v", err)
+			}
+		}()
 		fd, err := getConnDupFd(conn)
 		if err != nil {
 			t.Errorf("failed to getConnDupFd: %v", err)
@@ -66,7 +70,12 @@ func TestBlockReadFullAndBlockWriteFull(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to dial unix: %v\n", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			// This Fatalf is okay as it's in the main test goroutine's defer
+			t.Fatalf("conn.Close failed: %v", err)
+		}
+	}()
 	fd, err := getConnDupFd(conn)
 	if err != nil {
 		t.Errorf("failed to getConnDupFd: %v", err)

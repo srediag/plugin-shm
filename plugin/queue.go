@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -89,7 +89,7 @@ func createQueueManager(shmPath string, queueCap uint32) (*queueManager, error) 
 	//ignore mkdir error
 	_ = os.MkdirAll(filepath.Dir(shmPath), os.ModePerm)
 	if pathExists(shmPath) {
-		return nil, fmt.Errorf("queue was existed,path" + shmPath)
+		return nil, fmt.Errorf("queue was existed,path %s", shmPath)
 	}
 	memSize := countQueueMemSize(queueCap) * queueCount
 	if !canCreateOnDevShm(uint64(memSize), shmPath) {
@@ -99,7 +99,12 @@ func createQueueManager(shmPath string, queueCap uint32) (*queueManager, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		cerr := f.Close()
+		if cerr != nil {
+			internalLogger.warnf("file close error: %v", cerr)
+		}
+	}()
 
 	if err := f.Truncate(int64(memSize)); err != nil {
 		return nil, fmt.Errorf("truncate share memory failed,%s", err.Error())
@@ -149,7 +154,12 @@ func mappingQueueManager(shmPath string) (*queueManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		cerr := f.Close()
+		if cerr != nil {
+			internalLogger.warnf("file close error: %v", cerr)
+		}
+	}()
 	fileInfo, err := f.Stat()
 	if err != nil {
 		return nil, err

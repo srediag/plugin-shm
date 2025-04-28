@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -128,7 +128,9 @@ func listenAdmin(svr *plugin.Listener, admin net.Listener) {
 	// step 2. get admin listener fd
 	adminFd, _ := listenFD(admin)
 	fmt.Printf("dump listenAdmin adminFd %d\n", adminFd)
-	syscall.SetNonblock(adminFd, true)
+	if err := syscall.SetNonblock(adminFd, true); err != nil {
+		fmt.Println("SetNonblock error:", err)
+	}
 
 	// step 3. send admin listener fd
 	var buf [8]byte // recv epoch id, 8 bytes
@@ -159,10 +161,7 @@ func listenAdmin(svr *plugin.Listener, admin net.Listener) {
 	}
 
 	// step 6. wait for the hot restart done
-	for {
-		if svr.IsHotRestartDone() {
-			break
-		}
+	for !svr.IsHotRestartDone() {
 		time.Sleep(50 * time.Millisecond)
 	}
 	fmt.Println("old server finish shmipc hot restart")
@@ -216,7 +215,9 @@ func rebuildListener(fd int) (net.Listener, error) {
 
 func start() {
 	_ = syscall.Unlink(udsPath)
-	syscall.Unlink(adminPath)
+	if err := syscall.Unlink(adminPath); err != nil {
+		fmt.Println("Unlink adminPath error:", err)
+	}
 	fmt.Printf("server normal start\n")
 
 	// step 1. create shmipc listener

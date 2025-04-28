@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -396,14 +396,20 @@ func (p *streamPool) Session() *Session {
 
 func (p *streamPool) close() {
 	if p.session.Load() != nil {
-		p.session.Load().(*Session).Close()
+		cerr := p.session.Load().(*Session).Close()
+		if cerr != nil {
+			internalLogger.warnf("Session Close error: %v", cerr)
+		}
 	}
 	for {
 		s := p.pop()
 		if s == nil {
 			break
 		}
-		s.Close()
+		err := s.Close()
+		if err != nil {
+			internalLogger.warnf("Stream Close error: %v", err)
+		}
 	}
 }
 
@@ -431,17 +437,23 @@ func (p *streamPool) getOrOpenStream() (*Stream, error) {
 func (p *streamPool) putOrCloseStream(s *Stream) {
 	// if the stream is in fallback state, we will not reuse it
 	if s.inFallbackState {
-		s.Close()
+		if err := s.Close(); err != nil {
+			internalLogger.warnf("Stream Close error in fallback state: %v", err)
+		}
 		return
 	}
 
 	if err := s.reset(); err == nil {
 		s.ReleaseReadAndReuse()
 		if p.push(s) != nil {
-			s.Close()
+			if err := s.Close(); err != nil {
+				internalLogger.warnf("Stream Close error when pool full: %v", err)
+			}
 		}
 	} else {
-		s.Close()
+		if err := s.Close(); err != nil {
+			internalLogger.warnf("Stream Close error after reset failed: %v", err)
+		}
 	}
 }
 

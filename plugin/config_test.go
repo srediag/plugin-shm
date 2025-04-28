@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,27 +21,30 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
-func Test_VerifyConfig(t *testing.T) {
+type ConfigTestSuite struct {
+	suite.Suite
+}
+
+func (s *ConfigTestSuite) TestVerifyConfig() {
 	config := DefaultConfig()
-	// shm too small, err
 	config.ShareMemoryBufferCap = 1
 	err := VerifyConfig(config)
-	assert.NotEqual(t, nil, err)
+	s.Require().NotNil(err)
 	config.ShareMemoryBufferCap = 1 << 20
 
 	config.BufferSliceSizes = []*SizePercentPair{}
 	err = VerifyConfig(config)
-	assert.NotEqual(t, nil, err)
+	s.Require().NotNil(err)
 	config.BufferSliceSizes = []*SizePercentPair{
 		{4096, 70},
 		{16 << 10, 20},
 		{64 << 10, 9},
 	}
 	err = VerifyConfig(config)
-	assert.NotEqual(t, nil, err)
+	s.Require().NotNil(err)
 
 	config.BufferSliceSizes = []*SizePercentPair{
 		{4096, 70},
@@ -49,7 +52,7 @@ func Test_VerifyConfig(t *testing.T) {
 		{64 << 10, 11},
 	}
 	err = VerifyConfig(config)
-	assert.NotEqual(t, nil, err)
+	s.Require().NotNil(err)
 
 	config.BufferSliceSizes = []*SizePercentPair{
 		{4096, 70},
@@ -57,7 +60,7 @@ func Test_VerifyConfig(t *testing.T) {
 		{defaultShareMemoryCap, 11},
 	}
 	err = VerifyConfig(config)
-	assert.NotEqual(t, nil, err)
+	s.Require().NotNil(err)
 
 	config.BufferSliceSizes = []*SizePercentPair{
 		{4096, 70},
@@ -65,47 +68,58 @@ func Test_VerifyConfig(t *testing.T) {
 		{64 << 10, 10},
 	}
 	err = VerifyConfig(config)
-	assert.Equal(t, nil, err)
-
+	s.Require().Nil(err)
 }
 
-func Test_CreateCSByWrongConfig(t *testing.T) {
+func (s *ConfigTestSuite) TestCreateCSByWrongConfig() {
 	conn1, conn2 := testConn()
 	config := DefaultConfig()
 	config.ShareMemoryBufferCap = 1
 	c, err := newSession(config, conn1, true)
-	assert.NotEqual(t, nil, err)
-	assert.Equal(t, (*Session)(nil), c)
+	s.Require().NotNil(err)
+	s.Require().Nil(c)
 
 	ok := make(chan struct{})
 	go func() {
-		s, err := Server(conn2, config)
-		assert.NotEqual(t, nil, err)
-		assert.Equal(t, (*Session)(nil), s)
+		sess, err := Server(conn2, config)
+		s.Require().NotNil(err)
+		s.Require().Nil(sess)
 		close(ok)
 	}()
 	<-ok
 }
 
-func Test_CreateCSWithoutConfig(t *testing.T) {
+func (s *ConfigTestSuite) TestCreateCSWithoutConfig() {
 	conn1, conn2 := testConn()
 	ok := make(chan struct{})
 	go func() {
-		s, err := Server(conn2, nil)
-		assert.Equal(t, nil, err)
-		assert.NotEqual(t, (*Session)(nil), s)
+		sess, err := Server(conn2, nil)
+		s.Require().Nil(err)
+		s.Require().NotNil(sess)
 		if err == nil {
-			defer s.Close()
+			defer func() {
+				if err := sess.Close(); err != nil {
+					s.T().Fatalf("sess.Close failed: %v", err)
+				}
+			}()
 		}
 		close(ok)
 	}()
 
 	c, err := newSession(nil, conn1, true)
-	assert.Equal(t, nil, err)
+	s.Require().Nil(err)
 	if err == nil {
-		defer c.Close()
+		defer func() {
+			if err := c.Close(); err != nil {
+				s.T().Fatalf("c.Close failed: %v", err)
+			}
+		}()
 	}
-	assert.NotEqual(t, (*Session)(nil), c)
+	s.Require().NotNil(c)
 	time.Sleep(time.Second)
 	<-ok
+}
+
+func TestConfigTestSuite(t *testing.T) {
+	suite.Run(t, new(ConfigTestSuite))
 }

@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,6 +26,7 @@ import (
 	"github.com/srediag/plugin-shm/plugin"
 )
 
+// main is the entry point, suppress unused warning
 func main() {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -47,7 +48,11 @@ func main() {
 	if err != nil {
 		panic("create client session failed, " + err.Error())
 	}
-	defer s.Close()
+	defer func() {
+		if err := s.Close(); err != nil {
+			fmt.Println("s.Close error:", err)
+		}
+	}()
 
 	// 2.create stream
 	stream, err := s.GetStream()

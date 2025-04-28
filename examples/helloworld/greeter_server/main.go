@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,6 +28,7 @@ import (
 	"github.com/srediag/plugin-shm/plugin"
 )
 
+// main is the entry point, suppress unused warning
 func main() {
 	// 1. listen unix domain socket
 	dir, err := os.Getwd()
@@ -41,14 +42,22 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer ln.Close()
+	defer func() {
+		if err := ln.Close(); err != nil {
+			fmt.Println("ln.Close error:", err)
+		}
+	}()
 
 	// 2. accept a unix domain socket
 	conn, err := ln.Accept()
 	if err != nil {
 		panic(err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Println("conn.Close error:", err)
+		}
+	}()
 
 	// 3. create server session
 	conf := plugin.DefaultConfig()
@@ -56,14 +65,22 @@ func main() {
 	if err != nil {
 		panic("new ipc server failed " + err.Error())
 	}
-	defer s.Close()
+	defer func() {
+		if err := s.Close(); err != nil {
+			fmt.Println("s.Close error:", err)
+		}
+	}()
 
 	// 4. accept a stream
 	stream, err := s.AcceptStream()
 	if err != nil {
 		panic("accept stream failed " + err.Error())
 	}
-	defer stream.Close()
+	defer func() {
+		if err := stream.Close(); err != nil {
+			fmt.Println("stream.Close error:", err)
+		}
+	}()
 
 	// 5.read request data
 	reader := stream.BufferReader()

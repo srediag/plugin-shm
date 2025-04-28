@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -30,8 +30,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
+
+type SessionTestSuite struct {
+	suite.Suite
+}
 
 func testConn() (*net.UnixConn, *net.UnixConn) {
 	return testUdsConn()
@@ -55,7 +59,7 @@ func testUdsConn() (client *net.UnixConn, server *net.UnixConn) {
 		if err != nil {
 			panic("accept conn failed:" + err.Error())
 		}
-		ln.Close()
+		_ = ln.Close() // Ignore error on uds listener close in test setup
 		notifyCh <- struct{}{}
 	}()
 	<-notifyCh
@@ -108,93 +112,125 @@ func testClientServerConfig(conf *Config) (*Session, *Session) {
 	return client, server
 }
 
-func TestSession_OpenStream(t *testing.T) {
+func (s *SessionTestSuite) TestSession_OpenStream() {
 	fmt.Println("----------test session open stream----------")
 	client, server := testClientServer()
 
 	// case1: session closed
-	client.Close()
-	server.Close()
-	assert.Equal(t, true, client.IsClosed())
+	_ = client.Close()
+	_ = server.Close()
+	s.Require().True(client.IsClosed())
 	stream, err := client.OpenStream()
-	assert.Equal(t, (*Stream)(nil), stream)
-	assert.Equal(t, ErrSessionShutdown, err)
+	s.Require().Nil(stream)
+	s.Require().Equal(ErrSessionShutdown, err)
 	// client's Close will cause server's Close
-	assert.Equal(t, true, server.IsClosed())
+	s.Require().True(server.IsClosed())
 
 	//case2: CircuitBreaker triggered
 	client2, server2 := testClientServer()
 	client2.openCircuitBreaker()
 	stream2, err := client2.OpenStream()
-	assert.Equal(t, (*Stream)(nil), stream2)
-	assert.Equal(t, ErrSessionUnhealthy, err)
-	client2.Close()
-	server2.Close()
+	s.Require().Nil(stream2)
+	s.Require().Equal(ErrSessionUnhealthy, err)
+	if err := client2.Close(); err != nil {
+		s.T().Logf("client2.Close error: %v", err)
+	}
+	if err := server2.Close(); err != nil {
+		s.T().Logf("server2.Close error: %v", err)
+	}
 
 	// case3: stream exist
 	client3, server3 := testClientServer()
 	client3.streams[client3.nextStreamID+1] = newStream(client3, client3.nextStreamID+1)
 	stream3, err := client3.OpenStream()
-	assert.Equal(t, (*Stream)(nil), stream3)
-	assert.Equal(t, ErrStreamsExhausted, err)
-	client3.Close()
-	server3.Close()
+	s.Require().Nil(stream3)
+	s.Require().Equal(ErrStreamsExhausted, err)
+	if err := client3.Close(); err != nil {
+		s.T().Logf("client3.Close error: %v", err)
+	}
+	if err := server3.Close(); err != nil {
+		s.T().Logf("server3.Close error: %v", err)
+	}
 }
 
-func TestSession_AcceptStreamNormally(t *testing.T) {
+func (s *SessionTestSuite) TestSession_AcceptStreamNormally() {
 	fmt.Println("----------test session accept stream normally----------")
 	done := make(chan struct{})
 	notifyRead := make(chan struct{})
 	client, server := testClientServer()
-	defer client.Close()
-	defer server.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			s.T().Logf("client.Close error: %v", err)
+		}
+		if err := server.Close(); err != nil {
+			s.T().Logf("server.Close error: %v", err)
+		}
+	}()
 	// case1: accept stream normally
 	go func() {
 		cStream, err := client.OpenStream()
-		defer cStream.Close()
+		defer func() {
+			if err := cStream.Close(); err != nil {
+				s.T().Logf("cStream.Close error: %v", err)
+			}
+		}()
 		if err != nil {
-			t.Fatalf("Failed to open stream:%s", err.Error())
+			s.FailNow("Failed to open stream:", err.Error())
 		}
 		// only when we actually send something, the server can
 		// aware that a new stream created, therefore we need to
 		// send a byte to notify server
 		_ = cStream.BufferWriter().WriteString("1")
-		cStream.Flush(true)
+		if err := cStream.Flush(true); err != nil {
+			s.T().Logf("cStream.Flush error: %v", err)
+		}
 		// wait resp
 		<-notifyRead
 
 		respData, err := cStream.BufferReader().ReadBytes(1)
 		if err != nil {
-			t.Fatalf("Failed to read bytes:%s", err.Error())
+			s.FailNow("Failed to read bytes:", err.Error())
 		}
-		assert.Equal(t, "1", string(respData))
+		s.Require().Equal("1", string(respData))
 		close(done)
 	}()
 
 	sStream, err := server.AcceptStream()
 	if err != nil {
-		t.Fatalf("Failed to accept stream:%s", err.Error())
+		s.FailNow("Failed to accept stream:", err.Error())
 	}
-	defer sStream.Close()
+	defer func() {
+		if err := sStream.Close(); err != nil {
+			s.T().Logf("sStream.Close error: %v", err)
+		}
+	}()
 	respData, err := sStream.BufferReader().ReadBytes(1)
 	if err != nil {
-		t.Fatalf("Failed to read bytes:%s", err.Error())
+		s.FailNow("Failed to read bytes:", err.Error())
 	}
-	assert.Equal(t, "1", string(respData))
+	s.Require().Equal("1", string(respData))
 
 	// write back
 	_ = sStream.BufferWriter().WriteString("1")
-	sStream.Flush(true)
+	if err := sStream.Flush(true); err != nil {
+		s.T().Logf("sStream.Flush error: %v", err)
+	}
 	close(notifyRead)
 	<-done
 	fmt.Println("----------test session accept stream normally done----------")
 }
 
-func TestSession_AcceptStreamWhenSessionClosed(t *testing.T) {
+func (s *SessionTestSuite) TestSession_AcceptStreamWhenSessionClosed() {
 	fmt.Println("----------test session accept stream when session closed----------")
 	client, server := testClientServer()
-	defer client.Close()
-	defer server.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			s.T().Logf("client.Close error: %v", err)
+		}
+		if err := server.Close(); err != nil {
+			s.T().Logf("server.Close error: %v", err)
+		}
+	}()
 	done := make(chan struct{})
 	notifyAccept := make(chan struct{})
 	// case 2: accept when session closed
@@ -202,32 +238,44 @@ func TestSession_AcceptStreamWhenSessionClosed(t *testing.T) {
 		<-notifyAccept
 		// try accept after session shutdown
 		_, err := server.AcceptStream()
-		assert.Error(t, ErrSessionShutdown, err)
+		s.Require().Error(ErrSessionShutdown, err)
 		close(done)
 	}()
 
 	cStream2, err := client.OpenStream()
-	defer cStream2.Close() //lint:ignore SA5001
+	defer func() {
+		if err := cStream2.Close(); err != nil {
+			s.T().Logf("cStream2.Close error: %v", err)
+		}
+	}()
 
 	if err != nil {
-		t.Fatalf("Failed to malloc buf:%s", err.Error())
+		s.FailNow("Failed to malloc buf:", err.Error())
 	}
 	_ = cStream2.BufferWriter().WriteString("1")
-	cStream2.Flush(true)
+	if err := cStream2.Flush(true); err != nil {
+		s.T().Logf("cStream2.Flush error: %v", err)
+	}
 
 	// now shutdown session
-	client.Close()
-	server.Close()
-	assert.Equal(t, true, server.shutdown == 1)
+	_ = client.Close()
+	_ = server.Close()
+	s.Require().True(server.shutdown == 1)
 	close(notifyAccept)
 	<-done
 	fmt.Println("----------test session accept stream when session closed done----------")
 }
 
-func TestSendData_Small(t *testing.T) {
+func (s *SessionTestSuite) TestSendData_Small() {
 	client, server := testClientServer()
-	defer client.Close()
-	defer server.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			s.T().Logf("client.Close error: %v", err)
+		}
+		if err := server.Close(); err != nil {
+			s.T().Logf("server.Close error: %v", err)
+		}
+	}()
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
 
@@ -235,11 +283,11 @@ func TestSendData_Small(t *testing.T) {
 		defer wg.Done()
 		stream, err := server.AcceptStream()
 		if err != nil {
-			t.Logf("err: %v", err)
+			s.T().Logf("err: %v", err)
 		}
 
 		if server.GetActiveStreamCount() != 1 {
-			t.Fatal("num of streams is ", server.GetActiveStreamCount())
+			s.Fail("num of streams is ", server.GetActiveStreamCount())
 		}
 
 		size := 0
@@ -247,15 +295,16 @@ func TestSendData_Small(t *testing.T) {
 			bs, err := stream.BufferReader().ReadBytes(4)
 			size += 4
 			if err != nil {
-				t.Fatalf("read err: %v", err)
+				s.T().Errorf("read err: %v", err)
+				return
 			}
 			if string(bs) != "test" {
-				t.Logf("bad: %s", string(bs))
+				s.T().Logf("bad: %s", string(bs))
 			}
 		}
 
 		if err := stream.Close(); err != nil {
-			t.Logf("err: %v", err)
+			s.T().Logf("err: %v", err)
 		}
 	}()
 
@@ -263,26 +312,26 @@ func TestSendData_Small(t *testing.T) {
 		defer wg.Done()
 		stream, err := client.OpenStream()
 		if err != nil {
-			t.Logf("err: %v", err)
+			s.T().Logf("err: %v", err)
 		}
 
 		if client.GetActiveStreamCount() != 1 {
-			t.Logf("bad")
+			s.T().Logf("bad")
 		}
 
 		for i := 0; i < 100; i++ {
 			_, err := stream.BufferWriter().WriteBytes([]byte("test"))
 			if err != nil {
-				t.Logf("err: %v", err)
+				s.T().Logf("err: %v", err)
 			}
 			err = stream.Flush(false)
 			if err != nil {
-				t.Logf("err: %v", err)
+				s.T().Logf("stream.Flush error: %v", err)
 			}
 		}
 
 		if err := stream.Close(); err != nil {
-			t.Logf("err: %v", err)
+			s.T().Logf("err: %v", err)
 		}
 	}()
 
@@ -298,17 +347,23 @@ func TestSendData_Small(t *testing.T) {
 	}
 
 	if client.GetActiveStreamCount() != 0 {
-		t.Fatalf("bad, streams:%d", client.GetActiveStreamCount())
+		s.T().Fatalf("bad, streams:%d", client.GetActiveStreamCount())
 	}
 	if server.GetActiveStreamCount() != 0 {
-		t.Fatalf("bad")
+		s.T().Fatalf("bad")
 	}
 }
 
 func TestSendData_Large(t *testing.T) {
 	client, server := testClientServer()
-	defer client.Close()
-	defer server.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Logf("client.Close error: %v", err)
+		}
+		if err := server.Close(); err != nil {
+			t.Logf("server.Close error: %v", err)
+		}
+	}()
 
 	const (
 		sendSize = 2 * 1024 * 1024
@@ -329,7 +384,11 @@ func TestSendData_Large(t *testing.T) {
 		if err != nil {
 			t.Logf("err: %v", err)
 		}
-		defer stream.Close()
+		defer func() {
+			if err := stream.Close(); err != nil {
+				t.Logf("stream.Close error: %v", err)
+			}
+		}()
 		for hadRead := 0; hadRead < sendSize; hadRead++ {
 			if bt, err := stream.BufferReader().ReadByte(); bt != byte(hadRead%256) || err != nil {
 				t.Logf("bad: %v %v", hadRead, bt)
@@ -372,8 +431,14 @@ func TestSendData_Large(t *testing.T) {
 
 func TestManyStreams(t *testing.T) {
 	client, server := testClientServer()
-	defer server.Close()
-	defer client.Close()
+	defer func() {
+		if err := server.Close(); err != nil {
+			t.Fatalf("server.Close error: %v", err)
+		}
+		if err := client.Close(); err != nil {
+			t.Fatalf("client.Close error: %v", err)
+		}
+	}()
 
 	wg := &sync.WaitGroup{}
 	const writeSize = 8
@@ -381,12 +446,20 @@ func TestManyStreams(t *testing.T) {
 		defer wg.Done()
 		stream, err := server.AcceptStream()
 		if err != nil {
-			t.Fatalf("err: %v", err)
+			t.Errorf("AcceptStream[%d] err: %v", i, err)
+			return
 		}
-		defer stream.Close()
+		defer func() {
+			if err := stream.Close(); err != nil {
+				t.Logf("stream.Close error: %v", err)
+			}
+		}()
 
 		for {
-			stream.SetReadDeadline(time.Now().Add(1 * time.Second))
+			if err := stream.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
+				t.Errorf("SetReadDeadline[%d] error: %v", i, err)
+				return
+			}
 			buf := stream.BufferReader()
 			n, err := buf.Discard(writeSize)
 			if err == ErrEndOfStream {
@@ -397,10 +470,12 @@ func TestManyStreams(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("err: %v", err)
+				t.Errorf("Discard[%d] err: %v", i, err)
+				return
 			}
 			if buf.Len() != 0 {
-				t.Fatalf("err!0: %d n:%d", buf.Len(), n)
+				t.Errorf("Discard[%d] buf.Len() != 0: %d n:%d", i, buf.Len(), n)
+				return
 			}
 		}
 	}
@@ -408,19 +483,24 @@ func TestManyStreams(t *testing.T) {
 		defer wg.Done()
 		stream, err := client.OpenStream()
 		if err != nil {
-			t.Fatalf("err: %v", err)
+			t.Errorf("OpenStream[%d] err: %v", i, err)
+			return
 		}
-		defer stream.Close()
+		defer func() {
+			if err := stream.Close(); err != nil {
+				t.Logf("stream.Close error: %v", err)
+			}
+		}()
 
 		var msg [writeSize]byte
 		if _, err := stream.BufferWriter().WriteBytes(msg[:]); err != nil {
-			t.Fatal("err:", err.Error())
+			t.Errorf("err: %v", err)
+			return
 		}
 		err = stream.Flush(true)
 		if err != nil {
-			t.Fatalf("err: %v", err)
-		} else {
-			//fmt.Println("write len:", n)
+			t.Errorf("Flush[%d] err: %v", i, err)
+			return
 		}
 	}
 
@@ -438,8 +518,14 @@ func TestSendData_Small_Memfd(t *testing.T) {
 	conf.MemMapType = MemMapTypeMemFd
 	client, server := testClientServer()
 
-	defer client.Close()
-	defer server.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Logf("client.Close error: %v", err)
+		}
+		if err := server.Close(); err != nil {
+			t.Logf("server.Close error: %v", err)
+		}
+	}()
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
 
@@ -451,7 +537,8 @@ func TestSendData_Small_Memfd(t *testing.T) {
 		}
 
 		if server.GetActiveStreamCount() != 1 {
-			t.Fatal("num of streams is ", server.GetActiveStreamCount())
+			t.Errorf("Unexpected stream count: %d", server.GetActiveStreamCount())
+			return
 		}
 
 		size := 0
@@ -459,7 +546,8 @@ func TestSendData_Small_Memfd(t *testing.T) {
 			bs, err := stream.BufferReader().ReadBytes(4)
 			size += 4
 			if err != nil {
-				t.Fatalf("read err: %v", err)
+				t.Errorf("ReadBytes err: %v", err)
+				return
 			}
 			if string(bs) != "test" {
 				t.Logf("bad: %s", string(bs))
@@ -479,7 +567,8 @@ func TestSendData_Small_Memfd(t *testing.T) {
 		}
 
 		if client.GetActiveStreamCount() != 1 {
-			t.Logf("bad")
+			t.Errorf("Unexpected stream count: %d", client.GetActiveStreamCount())
+			return
 		}
 
 		for i := 0; i < 100; i++ {
@@ -489,7 +578,7 @@ func TestSendData_Small_Memfd(t *testing.T) {
 			}
 			err = stream.Flush(false)
 			if err != nil {
-				t.Logf("err: %v", err)
+				t.Logf("stream.Flush error: %v", err)
 			}
 		}
 

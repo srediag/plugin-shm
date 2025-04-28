@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -35,6 +35,7 @@ import (
 
 var count uint64
 
+// handleStream is used in main, suppress unused warning
 func handleStream(s *plugin.Stream) {
 	req := &idl.Request{}
 	resp := &idl.Response{}
@@ -82,6 +83,7 @@ func init() {
 	runtime.GOMAXPROCS(1)
 }
 
+// main is the entry point, suppress unused warning
 func main() {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -95,7 +97,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer ln.Close()
+	defer func() {
+		if err := ln.Close(); err != nil {
+			fmt.Println("ln.Close error:", err)
+		}
+	}()
 
 	// 2. accept a unix domain socket
 	for {
@@ -105,7 +111,11 @@ func main() {
 			return
 		}
 		go func() {
-			defer conn.Close()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Println("conn.Close error:", err)
+				}
+			}()
 
 			// 3. create server session
 			conf := plugin.DefaultConfig()
@@ -113,7 +123,11 @@ func main() {
 			if err != nil {
 				panic("new ipc server failed " + err.Error())
 			}
-			defer server.Close()
+			defer func() {
+				if err := server.Close(); err != nil {
+					fmt.Println("server.Close error:", err)
+				}
+			}()
 
 			// 4. accept stream and handle
 			for {

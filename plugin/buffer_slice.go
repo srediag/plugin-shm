@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,6 +32,11 @@ var (
 
 type bufferHeader []byte
 
+// bufferSlice represents a slice of shared memory buffer.
+//
+// WARNING: The internals of bufferSlice (such as header fields) are not safe for concurrent inspection or mutation
+// unless externally synchronized. After a bufferSlice is returned from pop(), do not inspect or mutate its fields
+// concurrently with push() or other operations.
 type bufferSlice struct {
 	//bufferHeader layout: cap 4 byte | size 4 byte | start 4 byte | next 4 byte | flag 4 byte
 	bufferHeader
@@ -96,10 +101,6 @@ func (s bufferHeader) setInUsed() {
 	s[bufferFlagOffset] |= sliceInUsedFlag
 }
 
-func (s bufferHeader) isInUsed() bool {
-	return (s[bufferFlagOffset] & sliceInUsedFlag) > 0
-}
-
 func (s bufferHeader) linkNext(next uint32) {
 	*(*uint32)(unsafe.Pointer(&s[nextBufferOffset])) = next
 	s[bufferFlagOffset] |= hasNextBufferFlag
@@ -119,7 +120,7 @@ func (s *bufferSlice) reset() {
 	if s.bufferHeader != nil {
 		*(*uint32)(unsafe.Pointer(&s.bufferHeader[bufferSizeOffset])) = 0
 		*(*uint32)(unsafe.Pointer(&s.bufferHeader[bufferDataStartOffset])) = 0
-		s.bufferHeader.clearFlag()
+		s.clearFlag()
 	}
 	s.writeIndex = 0
 	s.readIndex = 0
@@ -181,7 +182,12 @@ func (s *bufferSlice) skip(size int) int {
 	return unRead
 }
 
+// sliceList is a linked list of bufferSlice.
+//
+// WARNING: sliceList is NOT safe for concurrent use by multiple goroutines.
+// All access must be externally synchronized if used concurrently.
 type sliceList struct {
+	mu         sync.Mutex
 	frontSlice *bufferSlice
 	writeSlice *bufferSlice
 	backSlice  *bufferSlice
@@ -193,14 +199,20 @@ func newSliceList() *sliceList {
 }
 
 func (l *sliceList) front() *bufferSlice {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return l.frontSlice
 }
 
 func (l *sliceList) back() *bufferSlice {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return l.backSlice
 }
 
 func (l *sliceList) size() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return l.len
 }
 
@@ -208,34 +220,35 @@ func (l *sliceList) pushBack(s *bufferSlice) {
 	if s == nil {
 		return
 	}
-
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.len > 0 {
 		l.backSlice.nextSlice = s
 	} else {
 		l.frontSlice = s
 	}
-
 	l.backSlice = s
 	l.len++
 }
 
 func (l *sliceList) popFront() *bufferSlice {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	r := l.frontSlice
-
 	if l.len > 0 {
 		l.len--
 		l.frontSlice = l.frontSlice.nextSlice
 	}
-
 	if l.len == 0 {
 		l.frontSlice = nil
 		l.backSlice = nil
 	}
-
 	return r
 }
 
 func (l *sliceList) splitFromWrite() *bufferSlice {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	nextListHead := l.writeSlice.nextSlice
 	l.backSlice = l.writeSlice
 	l.backSlice.nextSlice = nil

@@ -1,5 +1,5 @@
 /*
- * * * Copyright 2025 SREDiag Authors
+ * Copyright 2025 SREDiag Authors
  * Copyright 2023 CloudWeGo Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,9 +18,9 @@
 package shmipc_client
 
 import (
+	"crypto/rand"
 	"flag"
 	"fmt"
-	"math/rand"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -57,7 +57,9 @@ func main() {
 	flag.Parse()
 
 	randContent := make([]byte, *packageSize)
-	rand.Read(randContent)
+	if _, err := rand.Read(randContent); err != nil {
+		panic(fmt.Sprintf("Failed to generate randContent: %v", err))
+	}
 
 	// 1. get current directory
 	dir, err := os.Getwd()
